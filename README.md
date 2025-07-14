@@ -46,6 +46,8 @@
 
 **Downloading datasets:** The processed datasets are available for [GEOM-Drugs](https://huggingface.co/datasets/carlosinator/tabasco-geom-drugs) and [QM9](https://huggingface.co/datasets/carlosinator/tabasco-qm9). Move all splits to `src/data` without renaming. Running `src/train.py` for the first time will generate the lmdb dataset, which only happens once and can take about an hour.
 
+**Checkpoints:** We currently provide checkpoints for two models trained on GEOM-Drugs: [TABASCO-mild (3.7M)](https://huggingface.co/carlosinator/tabasco-geom-mild) and [TABASCO-hot (15M)](https://huggingface.co/carlosinator/tabasco-geom-hot). More to follow!
+
 ### Installation
 
 ```bash
