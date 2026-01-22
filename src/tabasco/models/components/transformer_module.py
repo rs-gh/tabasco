@@ -152,7 +152,9 @@ class TransformerModule(nn.Module):
                         f"Invalid custom weight init: {self.custom_weight_init}"
                     )
 
-    def forward(self, coords, atomics, padding_mask, t, return_hidden_states: bool = False) -> Tensor:
+    def forward(
+        self, coords, atomics, padding_mask, t, return_hidden_states: bool = False
+    ) -> Tensor:
         """Forward pass of the module.
 
         Args:

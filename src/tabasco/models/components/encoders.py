@@ -1,8 +1,6 @@
 """Molecular encoders for REPA alignment."""
 
-import torch
 import torch.nn as nn
-from torch import Tensor
 
 
 class MolecularEncoder(nn.Module):
@@ -30,11 +28,13 @@ class DummyEncoder(MolecularEncoder):
     encoder like MACE or ChemProp.
     """
 
-    def __init__(self, input_dim: int = 3, hidden_dim: int = 128, encoder_dim: int = 256):
+    def __init__(
+        self, input_dim: int = 3, hidden_dim: int = 128, encoder_dim: int = 256
+    ):
         """Args:
-            input_dim: Input dimension (default 3 for coordinates)
-            hidden_dim: Hidden layer dimension
-            encoder_dim: Output embedding dimension
+        input_dim: Input dimension (default 3 for coordinates)
+        hidden_dim: Hidden layer dimension
+        encoder_dim: Output embedding dimension
         """
         super().__init__()
         self.encoder_dim = encoder_dim
@@ -80,7 +80,7 @@ class MACEEncoder(MolecularEncoder):
 
     def __init__(self, pretrained_path: str = None):
         """Args:
-            pretrained_path: Path to pre-trained MACE checkpoint
+        pretrained_path: Path to pre-trained MACE checkpoint
         """
         super().__init__()
         # TODO: Import and initialize MACE
@@ -113,19 +113,21 @@ class Projector(nn.Module):
 
     def __init__(self, hidden_dim: int, encoder_dim: int, num_layers: int = 2):
         """Args:
-            hidden_dim: Dimension of diffusion model hidden states
-            encoder_dim: Dimension of encoder embeddings
-            num_layers: Number of MLP layers
+        hidden_dim: Dimension of diffusion model hidden states
+        encoder_dim: Dimension of encoder embeddings
+        num_layers: Number of MLP layers
         """
         super().__init__()
 
         layers = []
         in_dim = hidden_dim
         for _ in range(num_layers - 1):
-            layers.extend([
-                nn.Linear(in_dim, hidden_dim),
-                nn.SiLU(),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(in_dim, hidden_dim),
+                    nn.SiLU(),
+                ]
+            )
             in_dim = hidden_dim
         layers.append(nn.Linear(in_dim, encoder_dim))
 

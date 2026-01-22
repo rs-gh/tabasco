@@ -87,8 +87,11 @@ class FlowMatchingModel(nn.Module):
     def _call_net(self, batch, t, return_hidden_states: bool = False):
         """Wrapper around `self.net` for `torch.compile` compatibility."""
         net_output = self.net(
-            batch["coords"], batch["atomics"], batch["padding_mask"], t,
-            return_hidden_states=return_hidden_states
+            batch["coords"],
+            batch["atomics"],
+            batch["padding_mask"],
+            t,
+            return_hidden_states=return_hidden_states,
         )
 
         if return_hidden_states:
@@ -124,8 +127,10 @@ class FlowMatchingModel(nn.Module):
         path = self._create_path(batch)
 
         # Extract hidden states during training if REPA is enabled
-        return_hidden_states = hasattr(self, 'repa_loss') and self.repa_loss is not None
-        pred = self._call_net(path.x_t, path.t, return_hidden_states=return_hidden_states)
+        return_hidden_states = hasattr(self, "repa_loss") and self.repa_loss is not None
+        pred = self._call_net(
+            path.x_t, path.t, return_hidden_states=return_hidden_states
+        )
 
         loss, stats_dict = self._compute_loss(path, pred, compute_stats)
         return loss, stats_dict

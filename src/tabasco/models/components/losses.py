@@ -149,12 +149,7 @@ class REPALoss(nn.Module):
         for param in self.encoder.parameters():
             param.requires_grad = False
 
-    def forward(
-        self,
-        path: FlowPath,
-        pred: TensorDict,
-        compute_stats: bool = True
-    ):
+    def forward(self, path: FlowPath, pred: TensorDict, compute_stats: bool = True):
         """Compute REPA alignment loss.
 
         Args:
@@ -170,7 +165,7 @@ class REPALoss(nn.Module):
             return 0.0, {}
 
         hidden_states = pred["hidden_states"]  # [B, N, hidden_dim]
-        padding_mask = pred["padding_mask"]    # [B, N]
+        padding_mask = pred["padding_mask"]  # [B, N]
 
         # Get target representations from frozen encoder
         # IMPORTANT: Use CLEAN molecules (x_1) as target, NOT noisy x_t
@@ -178,8 +173,8 @@ class REPALoss(nn.Module):
         with torch.no_grad():
             target_repr = self.encoder(
                 path.x_1["coords"],  # Clean coordinates
-                path.x_1["atomics"], # Clean atom types
-                padding_mask
+                path.x_1["atomics"],  # Clean atom types
+                padding_mask,
             )  # [B, N, encoder_dim]
 
         # Project diffusion hidden states to encoder space
@@ -187,10 +182,7 @@ class REPALoss(nn.Module):
 
         # Compute MSE loss, masking padded positions
         real_mask = ~padding_mask  # [B, N]
-        loss = F.mse_loss(
-            projected_repr[real_mask],
-            target_repr[real_mask]
-        )
+        loss = F.mse_loss(projected_repr[real_mask], target_repr[real_mask])
 
         # Optional: weight by time (stronger alignment for cleaner molecules)
         if self.time_weighting:
@@ -213,9 +205,7 @@ class REPALoss(nn.Module):
                 proj_mean = projected_repr[real_mask].mean(dim=0)
                 target_mean = target_repr[real_mask].mean(dim=0)
                 alignment = F.cosine_similarity(
-                    proj_mean.unsqueeze(0),
-                    target_mean.unsqueeze(0),
-                    dim=1
+                    proj_mean.unsqueeze(0), target_mean.unsqueeze(0), dim=1
                 ).item()
                 stats_dict["repa_alignment"] = alignment
 
