@@ -254,6 +254,7 @@ class CenteredMetricInterpolant(Interpolant):
             **kwargs: Forwarded to `Interpolant.__init__`.
         """
         super().__init__(**kwargs)
+        # Is this used anywhere?
         self.mse_loss = nn.MSELoss(reduction="none")
         self.centered = centered
         self.scale_noise_by_log_num_atoms = scale_noise_by_log_num_atoms

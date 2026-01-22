@@ -152,8 +152,20 @@ class TransformerModule(nn.Module):
                         f"Invalid custom weight init: {self.custom_weight_init}"
                     )
 
-    def forward(self, coords, atomics, padding_mask, t) -> Tensor:
-        """Forward pass of the module."""
+    def forward(self, coords, atomics, padding_mask, t, return_hidden_states: bool = False) -> Tensor:
+        """Forward pass of the module.
+
+        Args:
+            coords: Atomic coordinates
+            atomics: One-hot atom types
+            padding_mask: Padding mask
+            t: Time step
+            return_hidden_states: If True, return hidden states for REPA alignment
+
+        Returns:
+            coords, atom_logits if return_hidden_states=False
+            coords, atom_logits, h_out if return_hidden_states=True
+        """
         real_mask = 1 - padding_mask.int()
 
         embed_coords = self.linear_embed(coords)
@@ -221,4 +233,7 @@ class TransformerModule(nn.Module):
         else:
             atom_logits = self.out_atom_type_linear(h_out)
 
-        return coords, atom_logits
+        if return_hidden_states:
+            return coords, atom_logits, h_out
+        else:
+            return coords, atom_logits

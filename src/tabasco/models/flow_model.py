@@ -10,7 +10,7 @@ from torch import Tensor
 from tabasco.flow.interpolate import Interpolant
 from tabasco.flow.path import FlowPath
 from tabasco.flow.utils import HistogramTimeDistribution
-from tabasco.models.components.losses import InterDistancesLoss
+from tabasco.models.components.losses import InterDistancesLoss, REPALoss
 from tabasco.data.transforms import apply_random_rotation
 
 
@@ -30,6 +30,7 @@ class FlowMatchingModel(nn.Module):
         time_distribution: str = "uniform",
         time_alpha_factor: float = 2.0,
         interdist_loss: InterDistancesLoss = None,
+        repa_loss: REPALoss = None,
         num_random_augmentations: Optional[int] = None,
         sample_schedule: str = "linear",
         compile: bool = False,
@@ -41,6 +42,7 @@ class FlowMatchingModel(nn.Module):
         time_distribution: `uniform`, `beta`, or `histogram`.
         time_alpha_factor: Alpha for beta distribution (ignored otherwise).
         interdist_loss: Optional additional loss on inter-atomic distances.
+        repa_loss: Optional REPA alignment loss for representation learning.
         num_random_augmentations: Number of random rotations per sample.
         sample_schedule: `linear`, `power`, or `log` schedule in `sample`.
         compile: If True, passes the network through `torch.compile`.
@@ -55,6 +57,7 @@ class FlowMatchingModel(nn.Module):
         self.coords_interpolant = coords_interpolant
 
         self.interdist_loss = interdist_loss
+        self.repa_loss = repa_loss
         self.time_alpha_factor = time_alpha_factor
 
         if time_distribution == "uniform":
@@ -81,20 +84,34 @@ class FlowMatchingModel(nn.Module):
         """Set the data statistics."""
         self.data_stats = stats
 
-    def _call_net(self, batch, t):
+    def _call_net(self, batch, t, return_hidden_states: bool = False):
         """Wrapper around `self.net` for `torch.compile` compatibility."""
-        coords, atom_logits = self.net(
-            batch["coords"], batch["atomics"], batch["padding_mask"], t
+        net_output = self.net(
+            batch["coords"], batch["atomics"], batch["padding_mask"], t,
+            return_hidden_states=return_hidden_states
         )
 
-        return TensorDict(
-            {
-                "coords": coords,
-                "atomics": atom_logits,
-                "padding_mask": batch["padding_mask"],
-            },
-            batch_size=batch["padding_mask"].shape[0],
-        )
+        if return_hidden_states:
+            coords, atom_logits, hidden_states = net_output
+            return TensorDict(
+                {
+                    "coords": coords,
+                    "atomics": atom_logits,
+                    "hidden_states": hidden_states,
+                    "padding_mask": batch["padding_mask"],
+                },
+                batch_size=batch["padding_mask"].shape[0],
+            )
+        else:
+            coords, atom_logits = net_output
+            return TensorDict(
+                {
+                    "coords": coords,
+                    "atomics": atom_logits,
+                    "padding_mask": batch["padding_mask"],
+                },
+                batch_size=batch["padding_mask"].shape[0],
+            )
 
     def forward(self, batch, compute_stats: bool = True):
         """Compute training loss and optional stats."""
@@ -105,7 +122,10 @@ class FlowMatchingModel(nn.Module):
             )
 
         path = self._create_path(batch)
-        pred = self._call_net(path.x_t, path.t)
+
+        # Extract hidden states during training if REPA is enabled
+        return_hidden_states = hasattr(self, 'repa_loss') and self.repa_loss is not None
+        pred = self._call_net(path.x_t, path.t, return_hidden_states=return_hidden_states)
 
         loss, stats_dict = self._compute_loss(path, pred, compute_stats)
         return loss, stats_dict
@@ -174,7 +194,7 @@ class FlowMatchingModel(nn.Module):
     def _compute_loss(
         self, path: FlowPath, pred: TensorDict, compute_stats: bool = True
     ) -> Tensor:
-        """Compute and sum coordinate, atom-type, and optional inter-distance losses."""
+        """Compute and sum coordinate, atom-type, inter-distance, and REPA losses."""
 
         atomics_loss, atomics_stats = self.atomics_interpolant.compute_loss(
             path, pred, compute_stats
@@ -187,6 +207,12 @@ class FlowMatchingModel(nn.Module):
         else:
             dists_loss, dists_stats = 0, {}
 
+        # NEW: REPA alignment loss
+        if self.repa_loss:
+            repa_loss, repa_stats = self.repa_loss(path, pred, compute_stats)
+        else:
+            repa_loss, repa_stats = 0, {}
+
         if compute_stats:
             stats_dict = {
                 "atomics_loss": atomics_loss,
@@ -194,6 +220,7 @@ class FlowMatchingModel(nn.Module):
                 **atomics_stats,
                 **coord_stats,
                 **dists_stats,
+                **repa_stats,  # NEW: Include REPA stats
             }
 
             atomics_logit_norm = pred["atomics"].norm(dim=-1)
@@ -208,7 +235,7 @@ class FlowMatchingModel(nn.Module):
         else:
             stats_dict = {}
 
-        total_loss = atomics_loss + coords_loss + dists_loss
+        total_loss = atomics_loss + coords_loss + dists_loss + repa_loss  # MODIFIED
 
         return total_loss, stats_dict
 
