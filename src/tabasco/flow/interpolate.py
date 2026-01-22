@@ -254,8 +254,6 @@ class CenteredMetricInterpolant(Interpolant):
             **kwargs: Forwarded to `Interpolant.__init__`.
         """
         super().__init__(**kwargs)
-        # Is this used anywhere?
-        self.mse_loss = nn.MSELoss(reduction="none")
         self.centered = centered
         self.scale_noise_by_log_num_atoms = scale_noise_by_log_num_atoms
         self.noise_scale = noise_scale
@@ -372,7 +370,6 @@ class SDEMetricInterpolant(CenteredMetricInterpolant):
             **kwargs: Forwarded to `Interpolant.__init__`.
         """
         super().__init__(**kwargs)
-        self.mse_loss = nn.MSELoss(reduction="none")
         self.white_noise_sampling_scale = white_noise_sampling_scale
 
         if langevin_sampling_schedule is None:

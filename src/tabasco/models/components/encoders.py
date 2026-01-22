@@ -23,7 +23,7 @@ class MolecularEncoder(nn.Module):
 class DummyEncoder(MolecularEncoder):
     """Simple encoder for testing REPA integration without external dependencies.
 
-    This encoder uses a simple MLP to encode coordinates. It's meant for
+    This encoder uses a simple MLP to encode coordinates. It is meant for
     testing the REPA integration pipeline before adding a real molecular
     encoder like MACE or ChemProp.
     """
@@ -67,10 +67,7 @@ class DummyEncoder(MolecularEncoder):
 
 
 class MACEEncoder(MolecularEncoder):
-    """Wrapper around MACE encoder (requires mace-torch package).
-
-    MACE is a physics-based molecular encoder that uses equivariant message
-    passing. It's well-suited for molecular property prediction.
+    """Wrapper around MACE encoder.
 
     Note: This is a placeholder. Full implementation requires:
     1. Installing mace-torch package
@@ -108,7 +105,7 @@ class Projector(nn.Module):
 
     This is a trainable projection layer that maps the diffusion model's
     hidden states to the same dimensionality as the frozen encoder's
-    embeddings, enabling alignment via MSE loss.
+    embeddings, enabling alignment via cosine similarity or MSE loss.
     """
 
     def __init__(self, hidden_dim: int, encoder_dim: int, num_layers: int = 2):

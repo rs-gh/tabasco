@@ -130,6 +130,7 @@ class REPALoss(nn.Module):
         projector: nn.Module,
         lambda_repa: float = 0.5,
         time_weighting: bool = False,
+        similarity_type: str = "cosine",
     ):
         """Initialize REPA loss.
 
@@ -138,12 +139,14 @@ class REPALoss(nn.Module):
             projector: Trainable projection layer (hidden_dim -> encoder_dim)
             lambda_repa: Weight for REPA loss relative to flow matching loss
             time_weighting: If True, apply higher weight to alignment at t~1 (clean molecules)
+            similarity_type: "cosine" (paper default) or "mse"
         """
         super().__init__()
         self.encoder = encoder
         self.projector = projector
         self.lambda_repa = lambda_repa
         self.time_weighting = time_weighting
+        self.similarity_type = similarity_type
 
         # Freeze encoder to prevent co-adaptation
         for param in self.encoder.parameters():
@@ -180,9 +183,18 @@ class REPALoss(nn.Module):
         # Project diffusion hidden states to encoder space
         projected_repr = self.projector(hidden_states)  # [B, N, encoder_dim]
 
-        # Compute MSE loss, masking padded positions
+        # Compute loss, masking padded positions
         real_mask = ~padding_mask  # [B, N]
-        loss = F.mse_loss(projected_repr[real_mask], target_repr[real_mask])
+
+        if self.similarity_type == "cosine":
+            # Paper equation (8): negative mean cosine similarity
+            cos_sim = F.cosine_similarity(
+                projected_repr[real_mask], target_repr[real_mask], dim=-1
+            )
+            loss = -cos_sim.mean()
+        else:
+            # MSE alternative
+            loss = F.mse_loss(projected_repr[real_mask], target_repr[real_mask])
 
         # Optional: weight by time (stronger alignment for cleaner molecules)
         if self.time_weighting:
