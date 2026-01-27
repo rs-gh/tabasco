@@ -130,6 +130,12 @@ class UnconditionalLMDBDataset(BaseLMDBDataset):
             Furthermore, this function allows for failure when processing molecules,
             simply not adding them to the dataset.
         """
+        # Create LMDB directory if it doesn't exist
+        lmdb_parent_dir = os.path.dirname(self.lmdb_path)
+        if lmdb_parent_dir and not os.path.exists(lmdb_parent_dir):
+            os.makedirs(lmdb_parent_dir, exist_ok=True)
+            logger.info(f"Created LMDB directory: {lmdb_parent_dir}")
+
         db = lmdb.open(
             self.lmdb_path,
             map_size=10 * (1024 * 1024 * 1024),  # 10GB
