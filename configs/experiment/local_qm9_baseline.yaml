@@ -26,11 +26,11 @@ callbacks:
   save_mols: null  # Disable - sampling has NaN issues on MPS
 
 trainer:
-  max_epochs: 5  # Quick test
+  max_epochs: 3  # Quick test
   accelerator: mps  # Use Apple Silicon GPU
   devices: 1
   log_every_n_steps: 10
 
 logger:
   wandb:
-    name: "tabasco-qm9-baseline-local"
+    name: "${now:%m%d-%H%M}-tabasco-qm9-baseline-local"

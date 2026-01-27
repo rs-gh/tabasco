@@ -42,8 +42,9 @@ lightning_module:
 
 trainer:
   max_epochs: 100
+  enable_progress_bar: true
 
 logger:
   wandb:
-    name: "tabasco-qm9-baseline"
+    name: "${now:%m%d-%H%M}-tabasco-qm9-baseline"
     project: "tabasco"

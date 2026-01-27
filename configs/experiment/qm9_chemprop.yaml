@@ -20,4 +20,4 @@ model:
 
 logger:
   wandb:
-    name: "tabasco-qm9-chemprop"
+    name: "${now:%m%d-%H%M}-tabasco-qm9-chemprop"
