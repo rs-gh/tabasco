@@ -1,9 +1,10 @@
 # @package _global_
-# Local testing config for M3 Mac - smaller model and batch size
+# Local testing config for M3 Mac - baseline WITHOUT REPA
+# Use this to compare against qm9_chemprop_local (with REPA)
 defaults:
-  - qm9_small
+  - qm9_baseline
 
-tags: ["qm9", "repa", "chemprop", "local"]
+tags: ["qm9", "baseline", "local"]
 
 datamodule:
   batch_size: 32  # Smaller batch for local testing
@@ -15,18 +16,8 @@ model:
     num_layers: 4   # Fewer layers
     num_heads: 4
 
-  repa_loss:
-    _target_: tabasco.models.components.losses.REPALoss
-    lambda_repa: 0.5
-    similarity_type: cosine
-    time_weighting: false
-    encoder:
-      _target_: tabasco.models.components.encoders.ChemPropEncoder
-      pretrained: chemeleon
-    projector:
-      _target_: tabasco.models.components.encoders.Projector
-      hidden_dim: ${model.net.hidden_dim}
-      encoder_dim: 2048  # CheMeleon's hidden dimension
+  # No REPA loss - this is the baseline
+  repa_loss: null
 
 callbacks:
   ema: null  # Disable EMA - has issues with MPS
@@ -42,4 +33,4 @@ trainer:
 
 logger:
   wandb:
-    name: "tabasco-qm9-chemprop-local"
+    name: "tabasco-qm9-baseline-local"

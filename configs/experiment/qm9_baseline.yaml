@@ -1,6 +1,6 @@
 # @package _global_
 
-tags: ["qm9", "small"]
+tags: ["qm9", "baseline"]
 
 datamodule:
   _target_: tabasco.data.lmdb_datamodule.LmdbDataModule
@@ -27,6 +27,8 @@ model:
     activation: SiLU
     implementation: reimplemented
     cross_attention: true
+  repa_loss: null  # No REPA loss for baseline
+  compile: true
 
 callbacks:
   ema:
@@ -43,5 +45,5 @@ trainer:
 
 logger:
   wandb:
-    name: "tabasco-qm9-small"
+    name: "tabasco-qm9-baseline"
     project: "tabasco"

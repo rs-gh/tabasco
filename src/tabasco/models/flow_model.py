@@ -43,6 +43,8 @@ class FlowMatchingModel(nn.Module):
         time_alpha_factor: Alpha for beta distribution (ignored otherwise).
         interdist_loss: Optional additional loss on inter-atomic distances.
         repa_loss: Optional REPA alignment loss for representation learning.
+            As things stand, we only perform REPA for the final layer output.
+            TODO: Perform REPA for intermediate layers.
         num_random_augmentations: Number of random rotations per sample.
         sample_schedule: `linear`, `power`, or `log` schedule in `sample`.
         compile: If True, passes the network through `torch.compile`.
@@ -94,6 +96,9 @@ class FlowMatchingModel(nn.Module):
             return_hidden_states=return_hidden_states,
         )
 
+        # As things stand, we only extract the last layer's hidden state
+        # for REPA alignment.
+        # TODO: Perform REPA for intermediate layers.
         if return_hidden_states:
             coords, atom_logits, hidden_states = net_output
             return TensorDict(

@@ -1,8 +1,9 @@
 # @package _global_
+# Local testing config for M3 Mac - smaller model and batch size
 defaults:
-  - qm9_baseline
+  - local_qm9_baseline
 
-tags: ["qm9", "repa", "chemprop"]
+tags: ["qm9", "repa", "chemprop", "local"]
 
 model:
   repa_loss:
@@ -20,4 +21,4 @@ model:
 
 logger:
   wandb:
-    name: "tabasco-qm9-chemprop"
+    name: "tabasco-qm9-chemprop-local"

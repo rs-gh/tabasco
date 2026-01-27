@@ -79,7 +79,7 @@ class LightningTabasco(L.LightningModule):
 
     def training_step(self, batch):
         """Perform a single training step."""
-        loss, _ = self.model(batch, compute_stats=False)
+        loss, stats_dict = self.model(batch, compute_stats=True)
         self.log(
             "train/loss",
             loss,
@@ -88,6 +88,9 @@ class LightningTabasco(L.LightningModule):
             on_epoch=True,
             sync_dist=True,
         )
+        # Log REPA metrics if available
+        for k, v in stats_dict.items():
+            self.log(f"train/{k}", v, on_step=True, on_epoch=True, sync_dist=True)
         return loss
 
     def sample(self, **kwargs):
