@@ -1,0 +1,45 @@
+# @package _global_
+# Local testing config for M3 Mac - smaller model and batch size
+defaults:
+  - qm9_small
+
+tags: ["qm9", "repa", "chemprop", "local"]
+
+datamodule:
+  batch_size: 32  # Smaller batch for local testing
+  num_workers: 0  # Avoid multiprocessing issues on Mac
+
+model:
+  net:
+    hidden_dim: 64  # Smaller model for faster iteration
+    num_layers: 4   # Fewer layers
+    num_heads: 4
+
+  repa_loss:
+    _target_: tabasco.models.components.losses.REPALoss
+    lambda_repa: 0.5
+    similarity_type: cosine
+    time_weighting: false
+    encoder:
+      _target_: tabasco.models.components.encoders.ChemPropEncoder
+      pretrained: chemeleon
+    projector:
+      _target_: tabasco.models.components.encoders.Projector
+      hidden_dim: ${model.net.hidden_dim}
+      encoder_dim: 2048  # CheMeleon's hidden dimension
+
+callbacks:
+  ema: null  # Disable EMA - has issues with MPS
+  mol_metrics: null  # Disable - sampling has NaN issues on MPS
+  posebusters_metrics: null  # Disable - sampling has NaN issues on MPS
+  save_mols: null  # Disable - sampling has NaN issues on MPS
+
+trainer:
+  max_epochs: 5  # Quick test
+  accelerator: mps  # Use Apple Silicon GPU
+  devices: 1
+  log_every_n_steps: 10
+
+logger:
+  wandb:
+    name: "tabasco-qm9-chemprop-local"

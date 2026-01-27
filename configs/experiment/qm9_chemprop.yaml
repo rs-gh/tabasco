@@ -1,0 +1,23 @@
+# @package _global_
+defaults:
+  - qm9_small
+
+tags: ["qm9", "repa", "chemprop"]
+
+model:
+  repa_loss:
+    _target_: tabasco.models.components.losses.REPALoss
+    lambda_repa: 0.5
+    similarity_type: cosine
+    time_weighting: false
+    encoder:
+      _target_: tabasco.models.components.encoders.ChemPropEncoder
+      pretrained: chemeleon
+    projector:
+      _target_: tabasco.models.components.encoders.Projector
+      hidden_dim: ${model.net.hidden_dim}
+      encoder_dim: 2048  # CheMeleon's hidden dimension
+
+logger:
+  wandb:
+    name: "tabasco-qm9-chemprop"

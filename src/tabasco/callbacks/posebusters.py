@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import lightning as L
 from lightning import Callback
 
@@ -7,6 +9,9 @@ from posebusters import PoseBusters
 from yaml import safe_load
 
 log = RankedLogger(__name__, rank_zero_only=True)
+
+# Default config file path relative to this module
+_DEFAULT_CONFIG = Path(__file__).parent.parent / "utils" / "posebusters_no_strain.yaml"
 
 
 class PoseBustersCallback(Callback):
@@ -20,7 +25,7 @@ class PoseBustersCallback(Callback):
         num_samples: int = 1,
         num_sampling_steps: int = 100,
         compute_every: int = 1000,
-        config_file: str = "./src/tabasco/utils/posebusters_no_strain.yaml",
+        config_file: str = None,
     ):
         """Args:
         num_samples: Molecules to sample per evaluation.
@@ -32,6 +37,9 @@ class PoseBustersCallback(Callback):
         self.num_samples = num_samples
         self.num_sampling_steps = num_sampling_steps
 
+        # Use default config path if not specified
+        if config_file is None:
+            config_file = _DEFAULT_CONFIG
         self.cfg_file = safe_load(open(config_file, encoding="utf-8"))
         self.posebusters = PoseBusters(config=self.cfg_file)
 

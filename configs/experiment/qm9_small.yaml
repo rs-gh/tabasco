@@ -5,10 +5,10 @@ tags: ["qm9", "small"]
 datamodule:
   _target_: tabasco.data.lmdb_datamodule.LmdbDataModule
 
-  data_dir: ./data/processed_qm9_train.pt
-  val_data_dir: ./data/processed_qm9_val.pt
-  test_data_dir: ./data/processed_qm9_test.pt
-  lmdb_dir: ./data/lmdb_qm9
+  data_dir: ${paths.root_dir}/data/processed_qm9_train.pt
+  val_data_dir: ${paths.root_dir}/data/processed_qm9_val.pt
+  test_data_dir: ${paths.root_dir}/data/processed_qm9_test.pt
+  lmdb_dir: ${paths.root_dir}/data/lmdb_qm9
 
   add_random_rotation: true
   add_random_permutation: false

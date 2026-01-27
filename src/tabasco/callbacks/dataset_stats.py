@@ -54,16 +54,19 @@ class DatasetStatsCallback(Callback):
         log.info(f"Using rotated copies, effective batch size: {effective_batch_size}")
 
         if hasattr(pl_module, "logger") and pl_module.logger is not None:
-            if hasattr(pl_module.logger, "experiment") and hasattr(
-                pl_module.logger.experiment, "config"
-            ):
-                pl_module.logger.experiment.config.update(
-                    {
-                        "effective_batch_size": effective_batch_size,
-                        "augmentation_factor": pl_module.model.num_random_augmentations,
-                        "dataset_normalizer": pl_module.mol_converter.dataset_normalizer,
-                    }
-                )
+            experiment = getattr(pl_module.logger, "experiment", None)
+            # Check that experiment is not None and has a config with update method.
+            # Without this, we see errors with the mps backend.
+            if experiment is not None and hasattr(experiment, "config"):
+                config = getattr(experiment, "config", None)
+                if config is not None and hasattr(config, "update"):
+                    config.update(
+                        {
+                            "effective_batch_size": effective_batch_size,
+                            "augmentation_factor": pl_module.model.num_random_augmentations,
+                            "dataset_normalizer": pl_module.mol_converter.dataset_normalizer,
+                        }
+                    )
 
     def on_fit_start(self, trainer, pl_module):
         """Hook called once at the start of training."""
