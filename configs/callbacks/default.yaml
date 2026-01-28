@@ -4,3 +4,4 @@ defaults:
   - posebusters_metrics
   - save_mols
   - ema
+  - model_checkpoint

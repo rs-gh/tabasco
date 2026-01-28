@@ -1,0 +1,10 @@
+model_checkpoint:
+  _target_: lightning.pytorch.callbacks.ModelCheckpoint
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch={epoch:03d}-step={step}"
+  monitor: val/loss
+  mode: min
+  save_last: true  # always save last.ckpt for resuming
+  save_top_k: 3    # keep top 3 checkpoints
+  every_n_epochs: 1
+  verbose: true
