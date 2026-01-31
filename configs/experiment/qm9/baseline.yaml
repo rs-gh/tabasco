@@ -1,4 +1,6 @@
 # @package _global_
+defaults:
+  - /callbacks: default
 
 tags: ["qm9", "baseline"]
 
