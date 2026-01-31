@@ -82,8 +82,9 @@ class ChemPropEncoder(MolecularEncoder):
     Note: Since ChemProp is graph-based (not 3D), the coords are only used
     to infer bond connectivity via RDKit's DetermineBonds algorithm.
 
-    For REPA to work effectively, you should use pretrained weights (e.g., CheMeleon)
+    For REPA to work effectively, we use pretrained weights (e.g., CheMeleon)
     so the encoder provides meaningful molecular representations as alignment targets.
+    
     """
 
     def __init__(
@@ -109,6 +110,9 @@ class ChemPropEncoder(MolecularEncoder):
         from chemprop.nn import BondMessagePassing
         from chemprop.featurizers import SimpleMoleculeMolGraphFeaturizer
 
+        # coords/atomics -> RDKit.Chem.Mol
+        self.converter = MoleculeConverter()
+        # RDKit.Chem.Mol -> ChemProp MolGraph featurizer
         self.featurizer = SimpleMoleculeMolGraphFeaturizer()
 
         if pretrained is None or pretrained == "none":
@@ -127,6 +131,8 @@ class ChemPropEncoder(MolecularEncoder):
             )
         elif pretrained == "chemeleon":
             # Load CheMeleon foundation model
+            # Following the example at:
+            # https://github.com/chemprop/chemprop/blob/main/examples/chemeleon_foundation_finetuning.ipynb
             chemeleon_weights = self._load_chemeleon()
             self.message_passing = BondMessagePassing(**chemeleon_weights["hyper_parameters"])
             self.message_passing.load_state_dict(chemeleon_weights["state_dict"])
@@ -149,11 +155,9 @@ class ChemPropEncoder(MolecularEncoder):
                 )
                 self.message_passing.load_state_dict(weights)
 
-        # Molecule converter for coords/atomics -> RDKit mol
-        self.converter = MoleculeConverter()
-
     def _load_chemeleon(self) -> dict:
         """Download and load CheMeleon foundation model weights.
+        Paper: https://arxiv.org/pdf/2506.15792
 
         CheMeleon is pretrained on 1M molecules from PubChem and provides
         meaningful molecular representations for REPA alignment.
@@ -181,10 +185,6 @@ class ChemPropEncoder(MolecularEncoder):
             )
         else:
             logger.info(f"Loading cached CheMeleon from {model_path}")
-
-        logger.info(
-            "Please cite DOI: 10.48550/arXiv.2506.15792 when using CheMeleon in published work"
-        )
 
         return torch.load(model_path, map_location="cpu", weights_only=True)
 
@@ -268,38 +268,194 @@ class ChemPropEncoder(MolecularEncoder):
         return output
 
 
-class MACEEncoder(MolecularEncoder):
-    """Wrapper around MACE encoder.
+# class MACEEncoder(MolecularEncoder):
+#     """MACE-based 3D molecular encoder for REPA alignment.
 
-    Note: This is a placeholder. Full implementation requires:
-    1. Installing mace-torch package
-    2. Loading pre-trained MACE weights
-    3. Converting TABASCO's data format to MACE's expected format
-    """
+#     Uses MACE's equivariant neural network to extract atom-level embeddings
+#     from 3D molecular structures. Unlike ChemPropEncoder (2D graph-based),
+#     this encoder leverages 3D geometry.
 
-    def __init__(self, pretrained_path: str = None):
-        """Args:
-        pretrained_path: Path to pre-trained MACE checkpoint
-        """
-        super().__init__()
-        # TODO: Import and initialize MACE
-        # from mace import MACE
-        # self.mace = MACE.load(pretrained_path)
-        raise NotImplementedError("MACE integration not yet implemented")
+#     MACE (Multi-Atomic Cluster Expansion) models are pretrained on large
+#     molecular datasets and provide high-quality 3D-aware representations.
+#     """
 
-    def forward(self, coords, atomics, padding_mask):
-        """Extract MACE embeddings.
+#     def __init__(
+#         self,
+#         model_name: str = "small",
+#         invariants_only: bool = True,
+#         num_layers: int = -1,
+#     ):
+#         """Initialize MACE encoder.
 
-        Args:
-            coords: [B, N, 3] - atomic coordinates
-            atomics: [B, N, atom_dim] - one-hot atom types
-            padding_mask: [B, N] - True for padding
+#         Args:
+#             model_name: MACE model size - "small", "medium", or "large"
+#             invariants_only: If True, extract only rotation-invariant features
+#             num_layers: Number of interaction layers to extract (-1 for all)
+#         """
+#         import os
+#         import numpy as np
 
-        Returns:
-            repr: [B, N, encoder_dim] - MACE representations
-        """
-        # TODO: Convert to MACE format and get embeddings
-        raise NotImplementedError
+#         # E3NN requires this env variable
+#         os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
+
+#         super().__init__()
+
+#         from mace.calculators import mace_off
+#         from e3nn import o3
+
+#         # Load pretrained MACE model
+#         device = "cuda" if torch.cuda.is_available() else "cpu"
+#         self.calc = mace_off(model_name, device=device)
+#         self.model = self.calc.models[0]
+#         self._device = device
+#         self.model_name = model_name
+
+#         # Freeze model parameters
+#         for param in self.model.parameters():
+#             param.requires_grad = False
+
+#         # Calculate encoder_dim based on configuration
+#         self.num_interactions = int(self.model.num_interactions)
+#         self.num_layers = num_layers if num_layers != -1 else self.num_interactions
+#         self.invariants_only = invariants_only
+
+#         irreps_out = o3.Irreps(str(self.model.products[0].linear.irreps_out))
+#         l_max = irreps_out.lmax
+#         self.num_invariant_features = irreps_out.dim // (l_max + 1) ** 2
+#         self.l_max = l_max
+
+#         # Calculate total features to keep
+#         per_layer_features = [irreps_out.dim for _ in range(self.num_interactions)]
+#         per_layer_features[-1] = self.num_invariant_features
+#         self.encoder_dim = int(np.sum(per_layer_features[: self.num_layers]))
+
+#         # Atom type mapping: one-hot index -> atomic number
+#         # This should match the atom ordering in your dataset
+#         self.atom_type_map = {
+#             0: 6,  # C
+#             1: 7,  # N
+#             2: 8,  # O
+#             3: 16,  # S
+#             4: 15,  # P
+#             5: 9,  # F
+#             6: 17,  # Cl
+#             7: 35,  # Br
+#             8: 5,  # B
+#             9: 1,  # H
+#             10: 53,  # I
+#             11: 14,  # Si
+#             12: 34,  # Se
+#             13: 52,  # Te
+#         }
+
+#     def forward(self, coords, atomics, padding_mask):
+#         """Extract MACE atom embeddings.
+
+#         Args:
+#             coords: [B, N, 3] - atomic coordinates (normalized)
+#             atomics: [B, N, atom_dim] - one-hot atom types
+#             padding_mask: [B, N] - True for padding positions
+
+#         Returns:
+#             repr: [B, N, encoder_dim] - atom-level MACE representations
+#         """
+#         import numpy as np
+#         import ase
+#         from mace import data
+#         from mace.modules.utils import extract_invariant
+#         from mace.tools import torch_geometric
+
+#         B, N, _ = coords.shape
+#         device = coords.device
+
+#         # Convert each molecule to ASE Atoms
+#         atoms_list = []
+#         valid_indices = []
+#         atom_counts = []
+
+#         for i in range(B):
+#             mask = ~padding_mask[i]
+#             n_atoms = mask.sum().item()
+
+#             if n_atoms == 0:
+#                 continue
+
+#             # Get atom types (convert one-hot to atomic numbers)
+#             atom_types = atomics[i][mask].argmax(dim=-1).cpu().numpy()
+#             atomic_numbers = [self.atom_type_map.get(int(t), 6) for t in atom_types]
+
+#             # Get coordinates (rescale - coords are typically normalized by dividing by 2.0)
+#             mol_coords = coords[i][mask].cpu().numpy() * 2.0
+
+#             # Create ASE Atoms object
+#             atoms = ase.Atoms(numbers=atomic_numbers, positions=mol_coords)
+#             atoms_list.append(atoms)
+#             valid_indices.append(i)
+#             atom_counts.append(n_atoms)
+
+#         if len(atoms_list) == 0:
+#             return torch.zeros(B, N, self.encoder_dim, device=device)
+
+#         # Create MACE dataset
+#         keyspec = data.KeySpecification(
+#             info_keys=self.calc.info_keys, arrays_keys=self.calc.arrays_keys
+#         )
+
+#         configs = [
+#             data.config_from_atoms(x, key_specification=keyspec, head_name=self.calc.head)
+#             for x in atoms_list
+#         ]
+
+#         dataset = [
+#             data.AtomicData.from_config(
+#                 config,
+#                 z_table=self.calc.z_table,
+#                 cutoff=self.calc.r_max,
+#                 heads=self.calc.available_heads,
+#             )
+#             for config in configs
+#         ]
+
+#         # Create dataloader and process batch
+#         loader = torch_geometric.dataloader.DataLoader(
+#             dataset=dataset,
+#             batch_size=len(dataset),
+#             shuffle=False,
+#             drop_last=False,
+#         )
+
+#         batch = next(iter(loader)).to(self._device)
+
+#         with torch.no_grad():
+#             output = self.model(batch.to_dict(), compute_force=False)
+#             node_feats = output["node_feats"]
+
+#             if self.invariants_only:
+#                 descriptors = extract_invariant(
+#                     node_feats,
+#                     num_layers=self.num_layers,
+#                     num_features=self.num_invariant_features,
+#                     l_max=self.l_max,
+#                 )
+#             else:
+#                 descriptors = node_feats
+
+#             descriptors = descriptors[:, : self.encoder_dim]
+
+#         # Reconstruct batched output with padding
+#         output_tensor = torch.zeros(B, N, self.encoder_dim, device=device)
+
+#         batch_indices = batch["batch"].cpu().numpy()
+
+#         for local_idx, global_idx in enumerate(valid_indices):
+#             # Find atoms belonging to this molecule
+#             atom_mask = batch_indices == local_idx
+#             n_atoms = atom_counts[local_idx]
+
+#             # Copy embeddings to output tensor
+#             output_tensor[global_idx, :n_atoms] = descriptors[atom_mask].to(device)
+
+#         return output_tensor
 
 
 class Projector(nn.Module):

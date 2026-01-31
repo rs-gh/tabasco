@@ -93,7 +93,7 @@ class FlowMatchingModel(nn.Module):
             batch["atomics"],
             batch["padding_mask"],
             t,
-            return_hidden_states=return_hidden_states,
+            return_hidden_states,
         )
 
         # As things stand, we only extract the last layer's hidden state
@@ -217,7 +217,7 @@ class FlowMatchingModel(nn.Module):
         else:
             dists_loss, dists_stats = 0, {}
 
-        # NEW: REPA alignment loss
+        # Add REPA alignment loss
         if self.repa_loss:
             repa_loss, repa_stats = self.repa_loss(path, pred, compute_stats)
         else:
@@ -230,7 +230,7 @@ class FlowMatchingModel(nn.Module):
                 **atomics_stats,
                 **coord_stats,
                 **dists_stats,
-                **repa_stats,  # NEW: Include REPA stats
+                **repa_stats,
             }
 
             atomics_logit_norm = pred["atomics"].norm(dim=-1)
@@ -245,7 +245,7 @@ class FlowMatchingModel(nn.Module):
         else:
             stats_dict = {}
 
-        total_loss = atomics_loss + coords_loss + dists_loss + repa_loss  # MODIFIED
+        total_loss = atomics_loss + coords_loss + dists_loss + repa_loss
 
         return total_loss, stats_dict
 

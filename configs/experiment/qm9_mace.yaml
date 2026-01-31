@@ -1,0 +1,25 @@
+# # @package _global_
+# defaults:
+#   - qm9_baseline
+
+# tags: ["qm9", "repa", "mace"]
+
+# model:
+#   repa_loss:
+#     _target_: tabasco.models.components.losses.REPALoss
+#     lambda_repa: 0.5
+#     similarity_type: cosine
+#     time_weighting: false
+#     encoder:
+#       _target_: tabasco.models.components.encoders.MACEEncoder
+#       model_name: small  # small, medium, or large
+#       invariants_only: true
+#       num_layers: -1  # -1 for all layers
+#     projector:
+#       _target_: tabasco.models.components.encoders.Projector
+#       hidden_dim: ${model.net.hidden_dim}
+#       encoder_dim: 256  # MACE small encoder_dim (will be auto-calculated)
+
+# logger:
+#   wandb:
+#     name: "${now:%m%d-%H%M}-tabasco-qm9-mace"

@@ -171,8 +171,8 @@ class REPALoss(nn.Module):
         padding_mask = pred["padding_mask"]  # [B, N]
 
         # Get target representations from frozen encoder
-        # IMPORTANT: Use CLEAN molecules (x_1) as target, NOT noisy x_t
-        # Encoder is trained on clean data and won't give meaningful embeddings for noise
+        # From section 3.3 in the paper: "Specifically, we use the clean image
+        # representation as the target and explore its impact."
         with torch.no_grad():
             target_repr = self.encoder(
                 path.x_1["coords"],  # Clean coordinates
