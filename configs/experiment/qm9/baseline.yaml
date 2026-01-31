@@ -18,7 +18,7 @@ datamodule:
   remove_hydrogens: true
 
   batch_size: 256
-  num_workers: 4
+  num_workers: 0
 
 model:
   net:
