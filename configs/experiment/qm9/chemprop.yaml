@@ -1,6 +1,6 @@
 # @package _global_
 defaults:
-  - qm9_baseline
+  - /experiment/qm9/baseline
 
 tags: ["qm9", "repa", "chemprop"]
 

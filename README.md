@@ -60,13 +60,13 @@ conda activate tabasco
 The training configs are available under `configs/experiment`, which overwrite the defaults in the other `configs/*` folders. To train the `TABASCO-hot` model from the paper, you can run:
 
 ```python
-python src/train.py experiment=hot_geom trainer=gpu
+python src/train.py experiment=geom/hot trainer=gpu
 ```
 
 **Multi-GPU Training** is available via `torchrun` and trainer parameters are customizable in `configs/trainer`. You may want to pass additional command line arguments to `torchrun` depending on your setup. For example for two GPUs on one node using DDP (assuming a suitable `ddp.yaml` config) you can run
 
 ```python
-torchrun --nproc_per_node=2 --nnodes=1 src/train.py experiment=hot_geom trainer=ddp
+torchrun --nproc_per_node=2 --nnodes=1 src/train.py experiment=geom/hot trainer=ddp
 ```
 
 ### Sampling

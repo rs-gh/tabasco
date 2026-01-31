@@ -2,7 +2,7 @@
 # Local testing config for M3 Mac - baseline WITHOUT REPA
 # Use this to compare against qm9_chemprop_local (with REPA)
 defaults:
-  - qm9_baseline
+  - /experiment/qm9/baseline
 
 tags: ["qm9", "baseline", "local"]
 
