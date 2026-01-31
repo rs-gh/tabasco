@@ -21,9 +21,25 @@ model:
 
 callbacks:
   ema: null  # Disable EMA - has issues with MPS
-  mol_metrics: null  # Disable - sampling has NaN issues on MPS
-  posebusters_metrics: null  # Disable - sampling has NaN issues on MPS
-  save_mols: null  # Disable - sampling has NaN issues on MPS
+  dataset_stats:
+    _target_: tabasco.callbacks.DatasetStatsCallback
+  mol_metrics:
+    _target_: tabasco.callbacks.MoleculeMetricsCallback
+    num_samples: 20
+    compute_every: 1
+    num_sampling_steps: 50
+  posebusters_metrics:
+    _target_: tabasco.callbacks.PoseBustersCallback
+    num_samples: 20
+    compute_every: 1
+    num_sampling_steps: 50
+  save_mols:
+    _target_: tabasco.callbacks.SaveGeneratedMolsCallback
+    num_samples: 20
+    num_display_mols: 5
+    num_trajectories: 3
+    num_sampling_steps: 50
+    compute_every: 1
 
 trainer:
   max_epochs: 3  # Quick test
