@@ -5,10 +5,10 @@ tags: ["geom", "hot"]
 datamodule:
   _target_: tabasco.data.lmdb_datamodule.LmdbDataModule
 
-  data_dir: ./data/processed_geom_train.pt
-  val_data_dir: ./data/processed_geom_val.pt
-  test_data_dir: ./data/processed_geom_test.pt
-  lmdb_dir: ./data/lmdb_geom
+  data_dir: ${paths.root_dir}/data/processed_geom_train.pt
+  val_data_dir: ${paths.root_dir}/data/processed_geom_val.pt
+  test_data_dir: ${paths.root_dir}/data/processed_geom_test.pt
+  lmdb_dir: ${paths.root_dir}/data/lmdb_geom
 
   add_random_rotation: true
   add_random_permutation: false
