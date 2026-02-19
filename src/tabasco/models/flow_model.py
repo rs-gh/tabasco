@@ -96,20 +96,32 @@ class FlowMatchingModel(nn.Module):
             return_hidden_states,
         )
 
-        # As things stand, we only extract the last layer's hidden state
-        # for REPA alignment.
-        # TODO: Perform REPA for intermediate layers.
         if return_hidden_states:
-            coords, atom_logits, hidden_states = net_output
-            return TensorDict(
-                {
-                    "coords": coords,
-                    "atomics": atom_logits,
-                    "hidden_states": hidden_states,
-                    "padding_mask": batch["padding_mask"],
-                },
-                batch_size=batch["padding_mask"].shape[0],
-            )
+            if len(net_output) == 4:
+                # cross_attention=True: separate h_coord and h_atom returned
+                coords, atom_logits, h_coord, h_atom = net_output
+                return TensorDict(
+                    {
+                        "coords": coords,
+                        "atomics": atom_logits,
+                        "padding_mask": batch["padding_mask"],
+                        "hidden_states_coord": h_coord,
+                        "hidden_states_atom": h_atom,
+                    },
+                    batch_size=batch["padding_mask"].shape[0],
+                )
+            else:
+                # cross_attention=False: single h_out returned
+                coords, atom_logits, h_out = net_output
+                return TensorDict(
+                    {
+                        "coords": coords,
+                        "atomics": atom_logits,
+                        "padding_mask": batch["padding_mask"],
+                        "hidden_states_coord": h_out,
+                    },
+                    batch_size=batch["padding_mask"].shape[0],
+                )
         else:
             coords, atom_logits = net_output
             return TensorDict(
@@ -245,7 +257,12 @@ class FlowMatchingModel(nn.Module):
         else:
             stats_dict = {}
 
-        total_loss = atomics_loss + coords_loss + dists_loss + repa_loss
+        diffusion_loss = atomics_loss + coords_loss + dists_loss
+        if self.repa_loss:
+            lam = self.repa_loss.lambda_repa
+            total_loss = (1 - lam) * diffusion_loss + lam * repa_loss
+        else:
+            total_loss = diffusion_loss
 
         return total_loss, stats_dict
 

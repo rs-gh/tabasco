@@ -1,0 +1,49 @@
+# @package _global_
+# Local testing config for M3 Mac - GEOM baseline WITHOUT REPA
+defaults:
+  - /experiment/geom/mild
+
+tags: ["geom", "baseline", "local"]
+
+datamodule:
+  batch_size: 32
+  num_workers: 0
+
+model:
+  net:
+    hidden_dim: 64
+    num_layers: 4
+    num_heads: 4
+  repa_loss: null
+
+callbacks:
+  ema: null
+  dataset_stats:
+    _target_: tabasco.callbacks.DatasetStatsCallback
+  mol_metrics:
+    _target_: tabasco.callbacks.MoleculeMetricsCallback
+    num_samples: 20
+    compute_every: 1
+    num_sampling_steps: 50
+  posebusters_metrics:
+    _target_: tabasco.callbacks.PoseBustersCallback
+    num_samples: 20
+    compute_every: 1
+    num_sampling_steps: 50
+  save_mols:
+    _target_: tabasco.callbacks.SaveGeneratedMolsCallback
+    num_samples: 20
+    num_display_mols: 5
+    num_trajectories: 3
+    num_sampling_steps: 50
+    compute_every: 1
+
+trainer:
+  max_epochs: 3
+  accelerator: auto
+  devices: 1
+  log_every_n_steps: 10
+
+logger:
+  wandb:
+    name: "${now:%m%d-%H%M}-tabasco-geom-baseline-local"

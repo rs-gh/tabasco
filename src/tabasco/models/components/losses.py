@@ -163,12 +163,13 @@ class REPALoss(nn.Module):
         Returns:
             (loss, stats_dict)
         """
-        # If hidden states not available, return zero loss
-        if "hidden_states" not in pred:
+        # Collect all hidden state keys (hidden_states_coord, hidden_states_atom, etc.)
+        hs_keys = [k for k in pred.keys() if k.startswith("hidden_states_")]
+        if not hs_keys:
             return 0.0, {}
 
-        hidden_states = pred["hidden_states"]  # [B, N, hidden_dim]
         padding_mask = pred["padding_mask"]  # [B, N]
+        real_mask = ~padding_mask  # [B, N]
 
         # Get target representations from frozen encoder
         # From section 3.3 in the paper: "Specifically, we use the clean image
@@ -180,21 +181,28 @@ class REPALoss(nn.Module):
                 padding_mask,
             )  # [B, N, encoder_dim]
 
-        # Project diffusion hidden states to encoder space
-        projected_repr = self.projector(hidden_states)  # [B, N, encoder_dim]
+        # Compute loss for each hidden state independently, then average
+        stats_dict = {}
+        head_losses = []
+        for key in hs_keys:
+            h = pred[key]  # [B, N, hidden_dim]
+            projected = self.projector(h)  # [B, N, encoder_dim]
 
-        # Compute loss, masking padded positions
-        real_mask = ~padding_mask  # [B, N]
+            if self.similarity_type == "cosine":
+                cos_sim = F.cosine_similarity(
+                    projected[real_mask], target_repr[real_mask], dim=-1
+                )
+                head_loss = -cos_sim.mean()
+            else:
+                head_loss = F.mse_loss(projected[real_mask], target_repr[real_mask])
 
-        if self.similarity_type == "cosine":
-            # Paper equation (8): negative mean cosine similarity
-            cos_sim = F.cosine_similarity(
-                projected_repr[real_mask], target_repr[real_mask], dim=-1
-            )
-            loss = -cos_sim.mean()
-        else:
-            # MSE alternative
-            loss = F.mse_loss(projected_repr[real_mask], target_repr[real_mask])
+            head_losses.append(head_loss)
+
+            if compute_stats:
+                head_name = key.removeprefix("hidden_states_")
+                stats_dict[f"repa_alignment_{head_name}"] = -head_loss.item()
+
+        loss = torch.stack(head_losses).mean()
 
         # Optional: weight by time (stronger alignment for cleaner molecules)
         if self.time_weighting:
@@ -204,21 +212,7 @@ class REPALoss(nn.Module):
             time_weight = path.t.mean()
             loss = loss * time_weight
 
-        # Scale by lambda
-        loss = self.lambda_repa * loss
-
-        stats_dict = {}
         if compute_stats:
             stats_dict["repa_loss"] = loss.item()
-
-            # Compute cosine similarity as alignment metric
-            # Higher values (closer to 1) indicate better alignment
-            with torch.no_grad():
-                proj_mean = projected_repr[real_mask].mean(dim=0)
-                target_mean = target_repr[real_mask].mean(dim=0)
-                alignment = F.cosine_similarity(
-                    proj_mean.unsqueeze(0), target_mean.unsqueeze(0), dim=1
-                ).item()
-                stats_dict["repa_alignment"] = alignment
 
         return loss, stats_dict

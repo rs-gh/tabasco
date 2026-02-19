@@ -1,8 +1,9 @@
 # @package _global_
+# Local testing config for M3 Mac - GEOM with REPA (ChemProp encoder)
 defaults:
-  - /experiment/geom/mild
+  - /experiment/geom/local_baseline
 
-tags: ["geom", "repa", "chemprop"]
+tags: ["geom", "repa", "chemprop", "local"]
 
 model:
   repa_loss:
@@ -20,5 +21,4 @@ model:
 
 logger:
   wandb:
-    name: "${now:%m%d-%H%M}-tabasco-geom-chemprop"
-    project: "tabasco"
+    name: "${now:%m%d-%H%M}-tabasco-geom-chemprop-local"

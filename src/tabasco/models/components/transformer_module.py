@@ -236,6 +236,9 @@ class TransformerModule(nn.Module):
             atom_logits = self.out_atom_type_linear(h_out)
 
         if return_hidden_states:
-            return coords, atom_logits, h_out
+            if self.cross_attention:
+                return coords, atom_logits, h_coord, h_atom
+            else:
+                return coords, atom_logits, h_out
         else:
             return coords, atom_logits
