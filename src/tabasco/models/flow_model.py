@@ -260,7 +260,10 @@ class FlowMatchingModel(nn.Module):
         diffusion_loss = atomics_loss + coords_loss + dists_loss
         if self.repa_loss:
             lam = self.repa_loss.lambda_repa
-            total_loss = (1 - lam) * diffusion_loss + lam * repa_loss
+            if self.repa_loss.combination_mode == "tradeoff":
+                total_loss = (1 - lam) * diffusion_loss + lam * repa_loss
+            else:  # "additive"
+                total_loss = diffusion_loss + lam * repa_loss
         else:
             total_loss = diffusion_loss
 

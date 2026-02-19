@@ -8,6 +8,7 @@ model:
   repa_loss:
     _target_: tabasco.models.components.losses.REPALoss
     lambda_repa: 0.8
+    combination_mode: tradeoff
     similarity_type: cosine
     time_weighting: false
     encoder:

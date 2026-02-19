@@ -131,6 +131,7 @@ class REPALoss(nn.Module):
         lambda_repa: float = 0.5,
         time_weighting: bool = False,
         similarity_type: str = "cosine",
+        combination_mode: str = "additive",
     ):
         """Initialize REPA loss.
 
@@ -140,13 +141,19 @@ class REPALoss(nn.Module):
             lambda_repa: Weight for REPA loss relative to flow matching loss
             time_weighting: If True, apply higher weight to alignment at t~1 (clean molecules)
             similarity_type: "cosine" (paper default) or "mse"
+            combination_mode: How to combine REPA loss with diffusion loss.
+                "additive": total = diffusion + lambda_repa * repa  (REPA as regularizer)
+                "tradeoff": total = (1 - lambda_repa) * diffusion + lambda_repa * repa  (convex combination)
         """
+        if combination_mode not in ("additive", "tradeoff"):
+            raise ValueError(f"combination_mode must be 'additive' or 'tradeoff', got '{combination_mode}'")
         super().__init__()
         self.encoder = encoder
         self.projector = projector
         self.lambda_repa = lambda_repa
         self.time_weighting = time_weighting
         self.similarity_type = similarity_type
+        self.combination_mode = combination_mode
 
         # Freeze encoder to prevent co-adaptation
         for param in self.encoder.parameters():
