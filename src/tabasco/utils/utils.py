@@ -2,6 +2,7 @@ import warnings
 from importlib.util import find_spec
 from typing import Any, Callable, Dict, Optional, Tuple
 
+import torch
 from omegaconf import DictConfig, OmegaConf
 from lightning_utilities.core.rank_zero import rank_zero_only
 
@@ -158,13 +159,17 @@ def log_hyperparameters(object_dict: Dict[str, Any]) -> None:
     hparams["lightning_module"] = cfg["lightning_module"]
     hparams["neural_net"] = cfg["model"]
 
-    # save number of model parameters
-    hparams["model/params/total"] = sum(p.numel() for p in model.parameters())
+    # save number of model parameters (skip LazyModule uninitialized params)
+    initialized = [
+        p for p in model.parameters()
+        if not isinstance(p, torch.nn.UninitializedParameter)
+    ]
+    hparams["model/params/total"] = sum(p.numel() for p in initialized)
     hparams["model/params/trainable"] = sum(
-        p.numel() for p in model.parameters() if p.requires_grad
+        p.numel() for p in initialized if p.requires_grad
     )
     hparams["model/params/non_trainable"] = sum(
-        p.numel() for p in model.parameters() if not p.requires_grad
+        p.numel() for p in initialized if not p.requires_grad
     )
 
     hparams["datamodule"] = cfg["datamodule"]
