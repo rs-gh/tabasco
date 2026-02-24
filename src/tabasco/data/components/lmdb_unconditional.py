@@ -207,9 +207,30 @@ class UnconditionalLMDBDataset(BaseLMDBDataset):
             data_tensor = permute_atoms(data_tensor)
 
         # Embed canonical SMILES as a non-tensor field so downstream encoders
-        # (e.g. CachedChemPropEncoder) can look up pre-computed embeddings
-        # keyed by SMILES instead of re-running bond inference every step.
-        if index < len(self.all_smiles) and self.all_smiles[index]:
-            data_tensor.set_non_tensor("smiles", self.all_smiles[index])
+        # (e.g. ChemPropEncoder) can use fast MolFromSmiles + MolGraph cache
+        # instead of re-running expensive 3-D bond inference every step.
+        #
+        # TODO: Once the LMDB is regenerated, store SMILES in the dict during
+        #   _process():  data_dict = {"molecule": dp, "smiles": Chem.MolToSmiles(dp)}
+        #   and replace this block with:
+        #   if data_dict.get("smiles"):
+        #       data_tensor.set_non_tensor("smiles", data_dict["smiles"])
+        #
+        # We compute on-the-fly here (~0.1 ms/mol): the mol is already in hand
+        # from the LMDB read, so MolToSmiles is just serialising an existing bond
+        # graph — much cheaper than the DetermineConnectivity call it replaces.
+        #
+        # NOTE: self.all_smiles[index] is WRONG for this purpose.  all_smiles was
+        # built in numeric insertion order during _process() (0, 1, 2, ...), but
+        # self.keys is populated by LMDB's cursor in byte-sorted order
+        # ("0","1","10","100","11","2",...).  The two diverge from index 2 onwards
+        # for any dataset with more than 9 entries, so all_smiles[index] would
+        # silently return the SMILES for the wrong molecule.
+        try:
+            smi = Chem.MolToSmiles(data_dict["molecule"])
+            if smi:
+                data_tensor.set_non_tensor("smiles", smi)
+        except Exception:
+            pass
 
         return data_tensor
