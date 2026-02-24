@@ -2,7 +2,7 @@
 defaults:
   - /experiment/geom/mild
 
-tags: ["geom", "repa", "chemprop"]
+tags: ["geom", "repa", "chemprop", "additive"]
 
 model:
   repa_loss:
@@ -21,5 +21,5 @@ model:
 
 logger:
   wandb:
-    name: "${now:%m%d-%H%M}-tabasco-geom-chemprop"
+    name: "${now:%m%d-%H%M}-tabasco-geom-chemprop-additive"
     project: "tabasco"
