@@ -2,7 +2,6 @@
 
 import torch
 import torch.nn as nn
-from typing import Optional
 
 from tabasco.chem.convert import MoleculeConverter
 
@@ -10,13 +9,14 @@ from tabasco.chem.convert import MoleculeConverter
 class MolecularEncoder(nn.Module):
     """Base class for frozen molecular encoders used in REPA."""
 
-    def forward(self, coords, atomics, padding_mask):
+    def forward(self, coords, atomics, padding_mask, smiles=None):
         """Extract representations from molecules.
 
         Args:
             coords: [B, N, 3] - atomic coordinates
             atomics: [B, N, atom_dim] - one-hot atom types
             padding_mask: [B, N] - True for padding
+            smiles: Optional list of SMILES strings for fast-path encoders
 
         Returns:
             repr: [B, N, encoder_dim] - molecular representations
@@ -48,13 +48,14 @@ class DummyEncoder(MolecularEncoder):
             nn.Linear(hidden_dim, encoder_dim),
         )
 
-    def forward(self, coords, atomics, padding_mask):
+    def forward(self, coords, atomics, padding_mask, smiles=None):
         """Encode coordinates with simple MLP.
 
         Args:
             coords: [B, N, 3] - atomic coordinates
             atomics: [B, N, atom_dim] - one-hot atom types (unused in this simple encoder)
             padding_mask: [B, N] - True for padding
+            smiles: Ignored (accepted for interface compatibility with ChemPropEncoder)
 
         Returns:
             repr: [B, N, encoder_dim] - molecular representations
