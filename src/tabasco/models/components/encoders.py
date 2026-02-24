@@ -604,27 +604,29 @@ class Projector(nn.Module):
     This is a trainable projection layer that maps the diffusion model's
     hidden states to the same dimensionality as the frozen encoder's
     embeddings, enabling alignment via cosine similarity or MSE loss.
+
+    The first layer uses ``nn.LazyLinear`` so the input dimension is
+    inferred automatically on the first forward pass.  This means the
+    projector works regardless of how many hidden-state heads are fused
+    (e.g. ``cross_attention=True`` concatenates coord + atom heads).
     """
 
     def __init__(self, hidden_dim: int, encoder_dim: int, num_layers: int = 2):
         """Args:
-        hidden_dim: Dimension of diffusion model hidden states
-        encoder_dim: Dimension of encoder embeddings
+        hidden_dim: Intermediate MLP width
+        encoder_dim: Dimension of encoder embeddings (output size)
         num_layers: Number of MLP layers
         """
         super().__init__()
 
         layers = []
-        in_dim = hidden_dim
-        for _ in range(num_layers - 1):
-            layers.extend(
-                [
-                    nn.Linear(in_dim, hidden_dim),
-                    nn.SiLU(),
-                ]
-            )
-            in_dim = hidden_dim
-        layers.append(nn.Linear(in_dim, encoder_dim))
+        if num_layers == 1:
+            layers.append(nn.LazyLinear(encoder_dim))
+        else:
+            layers.extend([nn.LazyLinear(hidden_dim), nn.SiLU()])
+            for _ in range(num_layers - 2):
+                layers.extend([nn.Linear(hidden_dim, hidden_dim), nn.SiLU()])
+            layers.append(nn.Linear(hidden_dim, encoder_dim))
 
         self.mlp = nn.Sequential(*layers)
 

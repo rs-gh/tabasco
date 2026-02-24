@@ -137,7 +137,12 @@ class REPALoss(nn.Module):
 
         Args:
             encoder: Frozen pre-trained molecular encoder (e.g., MACE, ChemProp, DummyEncoder)
-            projector: Trainable projection layer (hidden_dim -> encoder_dim)
+            projector: Trainable projection layer that maps (possibly fused) hidden
+                states to the encoder embedding space.  When the network produces
+                multiple hidden-state heads (e.g. ``hidden_states_coord`` and
+                ``hidden_states_atom``), they are concatenated along the feature
+                dimension before projection, so ``projector.hidden_dim`` should
+                equal ``num_heads * net.hidden_dim``.
             lambda_repa: Weight for REPA loss relative to flow matching loss
             time_weighting: If True, apply higher weight to alignment at t~1 (clean molecules)
             similarity_type: "cosine" (paper default) or "mse"
@@ -171,7 +176,7 @@ class REPALoss(nn.Module):
             (loss, stats_dict)
         """
         # Collect all hidden state keys (hidden_states_coord, hidden_states_atom, etc.)
-        hs_keys = [k for k in pred.keys() if k.startswith("hidden_states_")]
+        hs_keys = sorted(k for k in pred.keys() if k.startswith("hidden_states_"))
         if not hs_keys:
             return 0.0, {}
 
@@ -196,28 +201,20 @@ class REPALoss(nn.Module):
                 smiles=smiles,
             )  # [B, N, encoder_dim]
 
-        # Compute loss for each hidden state independently, then average
+        # Fuse hidden states: concatenate along feature dimension.
+        # With cross_attention=True this yields [B, N, 2*hidden_dim];
+        # with cross_attention=False there is only one head so no-op.
+        h_fused = torch.cat([pred[k] for k in hs_keys], dim=-1)
+        projected = self.projector(h_fused)  # [B, N, encoder_dim]
+
         stats_dict = {}
-        head_losses = []
-        for key in hs_keys:
-            h = pred[key]  # [B, N, hidden_dim]
-            projected = self.projector(h)  # [B, N, encoder_dim]
-
-            if self.similarity_type == "cosine":
-                cos_sim = F.cosine_similarity(
-                    projected[real_mask], target_repr[real_mask], dim=-1
-                )
-                head_loss = -cos_sim.mean()
-            else:
-                head_loss = F.mse_loss(projected[real_mask], target_repr[real_mask])
-
-            head_losses.append(head_loss)
-
-            if compute_stats:
-                head_name = key.removeprefix("hidden_states_")
-                stats_dict[f"repa_alignment_{head_name}"] = -head_loss.item()
-
-        loss = torch.stack(head_losses).mean()
+        if self.similarity_type == "cosine":
+            cos_sim = F.cosine_similarity(
+                projected[real_mask], target_repr[real_mask], dim=-1
+            )
+            loss = -cos_sim.mean()
+        else:
+            loss = F.mse_loss(projected[real_mask], target_repr[real_mask])
 
         # Optional: weight by time (stronger alignment for cleaner molecules)
         if self.time_weighting:
