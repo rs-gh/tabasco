@@ -178,14 +178,22 @@ class REPALoss(nn.Module):
         padding_mask = pred["padding_mask"]  # [B, N]
         real_mask = ~padding_mask  # [B, N]
 
-        # Get target representations from frozen encoder
+        # Get target representations from frozen encoder.
         # From section 3.3 in the paper: "Specifically, we use the clean image
         # representation as the target and explore its impact."
+        # Pass SMILES (if available in the batch) so the encoder can use
+        # pre-computed embeddings rather than running bond inference on-the-fly.
+        try:
+            smiles = list(path.x_1.get_non_tensor("smiles"))
+        except KeyError:
+            smiles = None
+
         with torch.no_grad():
             target_repr = self.encoder(
                 path.x_1["coords"],  # Clean coordinates
                 path.x_1["atomics"],  # Clean atom types
                 padding_mask,
+                smiles=smiles,
             )  # [B, N, encoder_dim]
 
         # Compute loss for each hidden state independently, then average

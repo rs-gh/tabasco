@@ -114,6 +114,8 @@ class ChemPropEncoder(MolecularEncoder):
         self.converter = MoleculeConverter()
         # RDKit.Chem.Mol -> ChemProp MolGraph featurizer
         self.featurizer = SimpleMoleculeMolGraphFeaturizer()
+        # SMILES -> MolGraph cache (exact: ChemProp is 2-D, same graph for all conformers)
+        self._molgraph_cache = {}
 
         if pretrained is None or pretrained == "none":
             # Random initialization (not recommended for REPA)
@@ -188,49 +190,86 @@ class ChemPropEncoder(MolecularEncoder):
 
         return torch.load(model_path, map_location="cpu", weights_only=True)
 
-    def forward(self, coords, atomics, padding_mask):
+    def forward(self, coords, atomics, padding_mask, smiles=None):
         """Extract ChemProp atom embeddings.
 
         Args:
-            coords: [B, N, 3] - atomic coordinates (used for bond inference)
+            coords: [B, N, 3] - atomic coordinates
             atomics: [B, N, atom_dim] - one-hot atom types
             padding_mask: [B, N] - True for padding positions
+            smiles: optional list of B canonical SMILES strings. When provided,
+                molecules are built via Chem.MolFromSmiles (fast, ~0.4 ms each)
+                and MolGraphs are cached, avoiding 3-D bond inference (~20 ms
+                each) entirely. Falls back to from_tensor when None.
 
         Returns:
             repr: [B, N, encoder_dim] - atom-level representations
         """
         from tensordict import TensorDict
         from chemprop.data import BatchMolGraph
+        from rdkit import Chem
 
         B, N, _ = coords.shape
         device = coords.device
+
+        # RDKit/ChemProp operations are CPU-bound. Moving tensors to CPU once
+        # here avoids ~25,000 implicit GPU→CPU synchronisations per forward
+        # pass that would otherwise arise from .item() calls and element-wise
+        # iteration over CUDA tensors inside _make_mol_simple_imputation and
+        # _get_atom_types (each call to coords[i,j].item() stalls the GPU).
+        coords = coords.cpu()
+        atomics = atomics.cpu()
+        padding_mask = padding_mask.cpu()
 
         # Convert each molecule in batch to RDKit mol, then to ChemProp MolGraph
         molgraphs = []
         atom_counts = []  # Track atoms per molecule for later padding
 
         for i in range(B):
-            # Create TensorDict for this molecule
+            smi = smiles[i] if smiles is not None else None
+
+            # Fast path: build from SMILES and use per-SMILES MolGraph cache.
+            # ChemProp is a 2-D GNN so the MolGraph is identical for every
+            # conformer of the same molecule — caching is exact, not approximate.
+            if smi is not None:
+                cached = self._molgraph_cache.get(smi)
+                if cached is not None:
+                    molgraphs.append(cached)
+                    atom_counts.append(cached.V.shape[0])
+                    continue
+                try:
+                    mol = Chem.MolFromSmiles(smi)
+                    if mol is not None:
+                        mg = self.featurizer(mol)
+                        self._molgraph_cache[smi] = mg
+                        molgraphs.append(mg)
+                        atom_counts.append(mol.GetNumAtoms())
+                    else:
+                        molgraphs.append(None)
+                        atom_counts.append(0)
+                except Exception:
+                    molgraphs.append(None)
+                    atom_counts.append(0)
+                continue
+
+            # Slow path: 3-D bond inference (used when SMILES not available).
             mol_td = TensorDict({
                 "coords": coords[i],
                 "atomics": atomics[i],
                 "padding_mask": padding_mask[i],
             })
-
-            # Convert to RDKit mol (this handles bond inference)
             try:
                 mol = self.converter.from_tensor(
                     mol_td,
                     rescale_coords=True,
-                    sanitize=False,  # Don't sanitize to avoid failures
-                    use_openbabel=False,  # Use simpler bond inference
+                    sanitize=False,
+                    use_openbabel=False,
                 )
                 if mol is not None:
                     mg = self.featurizer(mol)
                     molgraphs.append(mg)
                     atom_counts.append(mol.GetNumAtoms())
                 else:
-                    # Failed conversion - use placeholder
                     molgraphs.append(None)
                     atom_counts.append(0)
             except Exception:
@@ -264,6 +303,106 @@ class ChemPropEncoder(MolecularEncoder):
                 output[i, :n_atoms] = atom_embeddings[emb_offset:emb_offset + n_atoms]
                 emb_offset += n_atoms
                 valid_idx += 1
+
+        return output
+
+
+class CachedChemPropEncoder(MolecularEncoder):
+    """ChemProp encoder backed by pre-computed CheMeleon embeddings.
+
+    Since CheMeleon is frozen and 2-D (uses only molecular topology, not 3-D
+    geometry), its output for a given SMILES is constant across all training
+    steps, epochs, and conformers.  Pre-computing once and reading from an
+    LMDB eliminates the GNN forward pass entirely during training, reducing
+    encoder time to a fast lookup + padding operation.
+
+    Usage
+    -----
+    1. Run scripts/tabasco/precompute_chemeleon_embeddings.py once to build
+       the embedding LMDB from all training SMILES.
+    2. Point this encoder at that LMDB via the `lmdb_path` constructor arg.
+    3. Swap ChemPropEncoder → CachedChemPropEncoder in the experiment config.
+
+    For SMILES not present in the cache (e.g. validation molecules not seen
+    during pre-computation) the encoder falls back to on-the-fly CheMeleon.
+    """
+
+    def __init__(self, lmdb_path: str, encoder_dim: int = 2048):
+        """Args:
+            lmdb_path: Path to the pre-computed embedding LMDB produced by
+                scripts/tabasco/precompute_chemeleon_embeddings.py.
+            encoder_dim: Embedding dimensionality (must match the pre-compute
+                run; default 2048 matches CheMeleon).
+        """
+        super().__init__()
+        import lmdb as _lmdb
+
+        self.encoder_dim = encoder_dim
+        self._lmdb_path = lmdb_path
+        self._db = _lmdb.open(
+            lmdb_path,
+            map_size=100 * (1024 ** 3),  # 100 GB map (virtual, not RSS)
+            create=False,
+            subdir=False,
+            readonly=True,
+            lock=False,
+            readahead=False,
+            meminit=False,
+        )
+        # Fallback encoder for SMILES not found in the pre-computed cache.
+        self._fallback = ChemPropEncoder(pretrained="chemeleon")
+        # Freeze fallback weights too.
+        for p in self._fallback.parameters():
+            p.requires_grad = False
+
+    def forward(self, coords, atomics, padding_mask, smiles=None):
+        """Look up pre-computed embeddings; fall back to on-the-fly for misses.
+
+        Args:
+            coords: [B, N, 3]  (only used for fallback molecules)
+            atomics: [B, N, atom_dim]  (only used for fallback molecules)
+            padding_mask: [B, N]
+            smiles: list of B SMILES strings (required for cache lookup)
+
+        Returns:
+            repr: [B, N, encoder_dim]
+        """
+        import pickle
+        import numpy as np
+
+        B, N, _ = coords.shape
+        device = coords.device
+        output = torch.zeros(B, N, self.encoder_dim, device=device)
+
+        if smiles is None:
+            # No SMILES — use fallback for entire batch.
+            return self._fallback(coords, atomics, padding_mask)
+
+        hit_indices, miss_indices = [], []
+        with self._db.begin() as txn:
+            for i, smi in enumerate(smiles):
+                val = txn.get(smi.encode()) if smi else None
+                if val is not None:
+                    emb = pickle.loads(val)            # float16 [n_atoms, D]
+                    emb_t = torch.from_numpy(emb.astype(np.float32)).to(device)
+                    n = min(emb_t.shape[0], N)
+                    output[i, :n] = emb_t[:n]
+                    hit_indices.append(i)
+                else:
+                    miss_indices.append(i)
+
+        if miss_indices:
+            # Batch the misses and run the fallback encoder on them only.
+            miss_coords   = coords[miss_indices]
+            miss_atomics  = atomics[miss_indices]
+            miss_padding  = padding_mask[miss_indices]
+            miss_smiles   = [smiles[j] for j in miss_indices]
+            with torch.no_grad():
+                miss_repr = self._fallback(
+                    miss_coords, miss_atomics, miss_padding, smiles=miss_smiles
+                )
+            for local_i, global_i in enumerate(miss_indices):
+                output[global_i] = miss_repr[local_i]
 
         return output
 

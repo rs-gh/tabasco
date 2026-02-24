@@ -206,4 +206,10 @@ class UnconditionalLMDBDataset(BaseLMDBDataset):
         if self.add_random_permutation:
             data_tensor = permute_atoms(data_tensor)
 
+        # Embed canonical SMILES as a non-tensor field so downstream encoders
+        # (e.g. CachedChemPropEncoder) can look up pre-computed embeddings
+        # keyed by SMILES instead of re-running bond inference every step.
+        if index < len(self.all_smiles) and self.all_smiles[index]:
+            data_tensor.set_non_tensor("smiles", self.all_smiles[index])
+
         return data_tensor

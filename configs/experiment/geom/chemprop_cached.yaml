@@ -1,0 +1,32 @@
+# @package _global_
+# Chemprop experiment using pre-computed CheMeleon embeddings.
+# Run scripts/tabasco/precompute_chemeleon_embeddings.py first to build the
+# embedding LMDB, then use this config instead of geom/chemprop.
+#
+# Expected speedup: encoder step drops from ~7 s → ~5 ms (lookup only),
+# making total epoch time close to the mild baseline (~26 min).
+defaults:
+  - /experiment/geom/mild
+
+tags: ["geom", "repa", "chemprop-cached"]
+
+model:
+  repa_loss:
+    _target_: tabasco.models.components.losses.REPALoss
+    lambda_repa: 0.8
+    combination_mode: tradeoff
+    similarity_type: cosine
+    time_weighting: false
+    encoder:
+      _target_: tabasco.models.components.encoders.CachedChemPropEncoder
+      lmdb_path: ${paths.root_dir}/data/chemeleon_geom/train_embeddings.lmdb
+      encoder_dim: 2048
+    projector:
+      _target_: tabasco.models.components.encoders.Projector
+      hidden_dim: ${model.net.hidden_dim}
+      encoder_dim: 2048
+
+logger:
+  wandb:
+    name: "${now:%m%d-%H%M}-tabasco-geom-chemprop-cached"
+    project: "tabasco"
