@@ -6,6 +6,7 @@ wandb:
   save_dir: "${paths.output_dir}"
   offline: False
   id: null # pass correct id to resume experiment!
+  resume: null # set to "must" when resuming with an id
   project: "tabasco"
   log_model: False
   prefix: ""

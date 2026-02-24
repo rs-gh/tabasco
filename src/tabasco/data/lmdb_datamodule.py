@@ -188,7 +188,7 @@ class LmdbDataModule(LightningDataModule):
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            num_workers=0,
             collate_fn=TensorDictCollator(),
             shuffle=True,
         )
@@ -198,7 +198,7 @@ class LmdbDataModule(LightningDataModule):
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            num_workers=0,
             collate_fn=TensorDictCollator(),
             shuffle=False,
         )
@@ -208,7 +208,7 @@ class LmdbDataModule(LightningDataModule):
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            num_workers=0,
             collate_fn=TensorDictCollator(),
             shuffle=False,
         )
