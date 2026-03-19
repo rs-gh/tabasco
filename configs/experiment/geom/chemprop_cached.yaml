@@ -1,6 +1,6 @@
 # @package _global_
 # Chemprop experiment using pre-computed CheMeleon embeddings.
-# Run scripts/tabasco/precompute_chemeleon_embeddings.py first to build the
+# Run playground/tabasco/chemeleon/precompute_embeddings.py first to build the
 # embedding LMDB, then use this config instead of geom/chemprop.
 #
 # Expected speedup: encoder step drops from ~7 s → ~5 ms (lookup only),
@@ -20,11 +20,11 @@ model:
     encoder:
       _target_: tabasco.models.components.encoders.CachedChemPropEncoder
       lmdb_path: ${paths.root_dir}/data/chemeleon_geom/train_embeddings.lmdb
-      encoder_dim: 2048
+      encoder_dim: 2048  # CheMeleon's hidden dimension
     projector:
       _target_: tabasco.models.components.encoders.Projector
       hidden_dim: ${model.net.hidden_dim}
-      encoder_dim: 2048
+      encoder_dim: 2048  # CheMeleon's hidden dimension
 
 logger:
   wandb:

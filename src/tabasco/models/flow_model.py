@@ -1,6 +1,7 @@
 import random
 from copy import deepcopy
-from typing import Dict, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -341,6 +342,94 @@ class FlowMatchingModel(nn.Module):
         x_t["coords"] = self.coords_interpolant.step(x_t, out_batch, t, step_size)
         x_t["atomics"] = self.atomics_interpolant.step(x_t, out_batch, t, step_size)
         return x_t
+
+    def _call_net_analysis(self, batch, t):
+        """Call net with return_hidden_states='all' for trajectory analysis.
+
+        Returns:
+            (pred_tensordict, analysis_dict) where analysis_dict contains
+            'intermediates', 'attn_weights', 'h_in', 'embed_components'.
+        """
+        net_output = self.net(
+            batch["coords"],
+            batch["atomics"],
+            batch["padding_mask"],
+            t,
+            return_hidden_states="all",
+            need_weights=True,
+        )
+        coords, atom_logits, analysis_dict = net_output
+        pred = TensorDict(
+            {
+                "coords": coords,
+                "atomics": atom_logits,
+                "padding_mask": batch["padding_mask"],
+            },
+            batch_size=batch["padding_mask"].shape[0],
+        )
+        return pred, analysis_dict
+
+    def sample_with_analysis(
+        self,
+        batch: Optional[TensorDict] = None,
+        num_steps: int = 100,
+        batch_size: Optional[int] = None,
+        capture_every_n: int = 5,
+    ):
+        """Sample molecules with per-layer, per-timestep analysis capture.
+
+        Like ``sample()`` but also captures intermediate hidden states and
+        attention weights at regular intervals for trajectory analysis.
+
+        Args:
+            batch: Optional reference batch for noise shape.
+            num_steps: Number of Euler steps.
+            batch_size: Required when ``batch`` is None.
+            capture_every_n: Capture analysis data every N timesteps.
+
+        Returns:
+            (x_t, captures) where captures is a list of dicts, each with keys:
+                "timestep_idx", "timestep", "pred", "analysis_dict"
+        """
+        x_t = self._sample_noise_like_batch(batch, batch_size)
+        captures = []
+
+        T = self._get_sample_schedule(num_steps)
+        T = T.to(x_t.device)[:, None]
+        T = T.repeat(1, x_t["coords"].shape[0])
+
+        for i in range(1, len(T)):
+            t = T[i - 1]
+            dt = T[i] - T[i - 1]
+
+            should_capture = (i - 1) % capture_every_n == 0
+
+            with torch.no_grad():
+                if should_capture:
+                    pred, analysis_dict = self._call_net_analysis(x_t, t)
+                    captures.append({
+                        "timestep_idx": i - 1,
+                        "timestep": t[0].item(),
+                        "pred": deepcopy(pred.detach().cpu()),
+                        "analysis_dict": {
+                            k: (
+                                [h.detach().cpu() for h in v]
+                                if isinstance(v, list) else
+                                v.detach().cpu() if isinstance(v, Tensor) else
+                                {kk: vv.detach().cpu() for kk, vv in v.items()}
+                                if isinstance(v, dict) else v
+                            )
+                            for k, v in analysis_dict.items()
+                            if v is not None
+                        },
+                    })
+                else:
+                    pred = self._call_net(x_t, t)
+
+            x_t["coords"] = self.coords_interpolant.step(x_t, pred, t, dt)
+            x_t["atomics"] = self.atomics_interpolant.step(x_t, pred, t, dt)
+
+        return x_t, captures
 
     def _sample_noise_like_batch(
         self, batch: Optional[TensorDict] = None, batch_size: Optional[int] = None

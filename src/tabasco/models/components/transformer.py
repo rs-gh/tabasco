@@ -55,6 +55,7 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         padding_mask: Optional[torch.Tensor] = None,
         attn_mask: Optional[torch.Tensor] = None,
+        need_weights: bool = False,
     ) -> torch.Tensor:
         """
         Forward pass through the transformer block.
@@ -65,20 +66,29 @@ class TransformerBlock(nn.Module):
                 Shape: [batch_size, seq_len]
             attn_mask: Mask to prevent attention to certain positions
                 Shape: [seq_len, seq_len] or [batch_size, seq_len, seq_len]
+            need_weights: If True, also return attention weights
 
         Returns:
             Output tensor of shape [batch_size, seq_len, dim]
+            If need_weights=True, returns (output, attn_weights)
         """
         # Self-attention with residual connection
-        attn_output = self.attn_block(
-            x, key_padding_mask=padding_mask, attn_mask=attn_mask
+        attn_result = self.attn_block(
+            x, key_padding_mask=padding_mask, attn_mask=attn_mask,
+            need_weights=need_weights,
         )
+        if need_weights:
+            attn_output, attn_weights = attn_result
+        else:
+            attn_output = attn_result
         x = x + attn_output
 
         # Feed-forward network with residual connection
         ff_output = self.ff_block(x)
         x = x + ff_output
 
+        if need_weights:
+            return x, attn_weights
         return x
 
 
@@ -140,6 +150,8 @@ class Transformer(nn.Module):
         x: torch.Tensor,
         padding_mask: Optional[torch.Tensor] = None,
         attn_mask: Optional[torch.Tensor] = None,
+        return_intermediates: bool = False,
+        need_weights: bool = False,
     ) -> torch.Tensor:
         """
         Forward pass through the transformer.
@@ -150,15 +162,34 @@ class Transformer(nn.Module):
                 Shape: [batch_size, seq_len]
             attn_mask: Mask to prevent attention to certain positions
                 Shape: [seq_len, seq_len] or [batch_size, seq_len, seq_len]
+            return_intermediates: If True, return per-layer hidden states
+            need_weights: If True, return per-layer attention weights
 
         Returns:
             Output tensor of shape [batch_size, seq_len, dim]
+            If return_intermediates or need_weights, returns a tuple:
+                (output, intermediates_list, attn_weights_list)
+                where intermediates_list/attn_weights_list are None if not requested
         """
-        # Pass through each transformer block
+        intermediates = [] if return_intermediates else None
+        all_attn_weights = [] if need_weights else None
+
         for layer in self.layers:
-            x = layer(x, padding_mask=padding_mask, attn_mask=attn_mask)
+            result = layer(
+                x, padding_mask=padding_mask, attn_mask=attn_mask,
+                need_weights=need_weights,
+            )
+            if need_weights:
+                x, attn_w = result
+                all_attn_weights.append(attn_w)
+            else:
+                x = result
+            if return_intermediates:
+                intermediates.append(x)
 
         # Apply final normalization
         x = self.norm(x)
 
+        if return_intermediates or need_weights:
+            return x, intermediates, all_attn_weights
         return x

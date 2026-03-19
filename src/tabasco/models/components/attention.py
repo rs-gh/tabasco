@@ -125,13 +125,15 @@ class AttentionBlock(nn.Module):
         need_weights: bool = False,
     ) -> torch.Tensor:
         x = self.norm(x)
-        x = self.attention(
+        result = self.attention(
             x,
             key_padding_mask=key_padding_mask,
             attn_mask=attn_mask,
             need_weights=need_weights,
         )
-        return x
+        if need_weights:
+            return result[0], result[1]
+        return result
 
 
 class AdaLNAttention(nn.Module):

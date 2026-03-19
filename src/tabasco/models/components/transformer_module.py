@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -152,21 +152,14 @@ class TransformerModule(nn.Module):
                         f"Invalid custom weight init: {self.custom_weight_init}"
                     )
 
-    def forward(
-        self, coords, atomics, padding_mask, t, return_hidden_states: bool = False
-    ) -> Tensor:
-        """Forward pass of the module.
-
-        Args:
-            coords: Atomic coordinates
-            atomics: One-hot atom types
-            padding_mask: Padding mask
-            t: Time step
-            return_hidden_states: If True, return hidden states for REPA alignment
+    def _compute_input_embedding(
+        self, coords, atomics, padding_mask, t,
+    ) -> tuple:
+        """Compute input embeddings and return individual components.
 
         Returns:
-            coords, atom_logits if return_hidden_states=False
-            coords, atom_logits, h_out if return_hidden_states=True
+            (h_in, real_mask, embed_components) where embed_components is a dict
+            of individual embedding tensors before summation.
         """
         real_mask = 1 - padding_mask.int()
 
@@ -185,13 +178,21 @@ class TransformerModule(nn.Module):
         embed_time = self.time_encoding(t).unsqueeze(1)
 
         assert embed_posenc.shape == embed_coords.shape == embed_atom_types.shape, (
-            f"embed_posenc.shape: {embed_posenc.shape}, embed_coords.shape: {embed_coords.shape}, embed_atom_types.shape: {embed_atom_types.shape}"
+            f"embed_posenc.shape: {embed_posenc.shape}, embed_coords.shape: "
+            f"{embed_coords.shape}, embed_atom_types.shape: {embed_atom_types.shape}"
         )
 
+        embed_components = {
+            "coords": embed_coords,
+            "atoms": embed_atom_types,
+            "posenc": embed_posenc,
+            "time": embed_time,
+        }
+
         if self.concat_combine_input:
-            embed_time = embed_time.repeat(1, coords.shape[1], 1)
+            embed_time_exp = embed_time.repeat(1, coords.shape[1], 1)
             h_in = torch.cat(
-                [embed_coords, embed_atom_types, embed_posenc, embed_time], dim=-1
+                [embed_coords, embed_atom_types, embed_posenc, embed_time_exp], dim=-1
             )
             assert h_in.shape == (
                 coords.shape[0],
@@ -199,17 +200,85 @@ class TransformerModule(nn.Module):
                 4 * self.hidden_dim,
             ), f"h_in.shape: {h_in.shape}"
             h_in = self.combine_input(h_in)
-            assert h_in.shape == (coords.shape[0], coords.shape[1], self.hidden_dim), (
-                f"h_in.shape: {h_in.shape}"
-            )
+            assert h_in.shape == (
+                coords.shape[0], coords.shape[1], self.hidden_dim
+            ), f"h_in.shape: {h_in.shape}"
         else:
             h_in = embed_coords + embed_atom_types + embed_posenc + embed_time
         h_in = h_in * real_mask.unsqueeze(-1)
 
+        return h_in, real_mask, embed_components
+
+    def forward(
+        self, coords, atomics, padding_mask, t,
+        return_hidden_states: Union[bool, str] = False,
+        need_weights: bool = False,
+    ) -> Tensor:
+        """Forward pass of the module.
+
+        Args:
+            coords: Atomic coordinates
+            atomics: One-hot atom types
+            padding_mask: Padding mask
+            t: Time step
+            return_hidden_states: False, True (final only), or "all" (per-layer)
+            need_weights: If True, capture attention weights from each layer
+
+        Returns:
+            Default: (coords, atom_logits)
+            return_hidden_states=True: (coords, atom_logits, h_coord[, h_atom])
+            return_hidden_states="all": (coords, atom_logits, analysis_dict)
+                where analysis_dict has keys: "intermediates", "attn_weights",
+                "h_in", "embed_components"
+        """
+        h_in, real_mask, embed_components = self._compute_input_embedding(
+            coords, atomics, padding_mask, t,
+        )
+
+        # Determine whether we need intermediates from the transformer
+        want_intermediates = return_hidden_states == "all"
+        want_attn = need_weights
+
         if self.implementation == "pytorch":
-            h_out = self.transformer(h_in, src_key_padding_mask=padding_mask)
+            if want_intermediates or want_attn:
+                # nn.TransformerEncoder doesn't support intermediate extraction,
+                # so iterate manually over layers.
+                h = h_in
+                intermediates = [] if want_intermediates else None
+                all_attn_weights = [] if want_attn else None
+                for layer in self.transformer.layers:
+                    if want_attn:
+                        # Enable weight capture via the layer's self_attn
+                        h_norm = layer.norm1(h)
+                        attn_out, attn_w = layer.self_attn(
+                            h_norm, h_norm, h_norm,
+                            key_padding_mask=padding_mask,
+                            need_weights=True,
+                        )
+                        h = h + attn_out
+                        h = h + layer._ff_block(layer.norm2(h))
+                        all_attn_weights.append(attn_w)
+                    else:
+                        h = layer(h, src_key_padding_mask=padding_mask)
+                    if want_intermediates:
+                        intermediates.append(h)
+                h_out = self.transformer.norm(h) if self.transformer.norm is not None else h
+            else:
+                h_out = self.transformer(h_in, src_key_padding_mask=padding_mask)
+                intermediates = None
+                all_attn_weights = None
         elif self.implementation == "reimplemented":
-            h_out = self.transformer(h_in, padding_mask=padding_mask)
+            if want_intermediates or want_attn:
+                result = self.transformer(
+                    h_in, padding_mask=padding_mask,
+                    return_intermediates=want_intermediates,
+                    need_weights=want_attn,
+                )
+                h_out, intermediates, all_attn_weights = result
+            else:
+                h_out = self.transformer(h_in, padding_mask=padding_mask)
+                intermediates = None
+                all_attn_weights = None
 
         h_out = h_out * real_mask.unsqueeze(-1)
 
@@ -235,7 +304,15 @@ class TransformerModule(nn.Module):
         else:
             atom_logits = self.out_atom_type_linear(h_out)
 
-        if return_hidden_states:
+        if return_hidden_states == "all":
+            analysis_dict = {
+                "intermediates": intermediates,
+                "attn_weights": all_attn_weights,
+                "h_in": h_in,
+                "embed_components": embed_components,
+            }
+            return coords, atom_logits, analysis_dict
+        elif return_hidden_states:
             if self.cross_attention:
                 return coords, atom_logits, h_coord, h_atom
             else:
