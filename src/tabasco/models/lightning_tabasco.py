@@ -42,7 +42,7 @@ class LightningTabasco(L.LightningModule):
         """
         super().__init__()
         self.model = model
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["model"])
 
         self.mol_converter = MoleculeConverter()
         self.mol_metrics = torch.nn.ModuleDict(

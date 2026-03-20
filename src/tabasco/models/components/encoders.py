@@ -408,194 +408,205 @@ class CachedChemPropEncoder(MolecularEncoder):
         return output
 
 
-# class MACEEncoder(MolecularEncoder):
-#     """MACE-based 3D molecular encoder for REPA alignment.
+class MACEEncoder(MolecularEncoder):
+    """MACE-based 3D molecular encoder for REPA alignment.
 
-#     Uses MACE's equivariant neural network to extract atom-level embeddings
-#     from 3D molecular structures. Unlike ChemPropEncoder (2D graph-based),
-#     this encoder leverages 3D geometry.
+    Uses MACE's equivariant neural network to extract atom-level embeddings
+    from 3D molecular structures. Unlike ChemPropEncoder (2D graph-based),
+    this encoder leverages 3D geometry and produces conformer-sensitive
+    representations.
 
-#     MACE (Multi-Atomic Cluster Expansion) models are pretrained on large
-#     molecular datasets and provide high-quality 3D-aware representations.
-#     """
+    MACE-OFF models are pretrained on molecular energies/forces and provide
+    high-quality 3D-aware atom embeddings with zero sparsity (no ReLU).
+    """
 
-#     def __init__(
-#         self,
-#         model_name: str = "small",
-#         invariants_only: bool = True,
-#         num_layers: int = -1,
-#     ):
-#         """Initialize MACE encoder.
+    # ATOM_NAMES from constants.py: [C, N, O, F, S, Cl, Br, I, *]
+    # Map one-hot index -> atomic number for ASE
+    ATOM_INDEX_TO_Z = {
+        0: 6,   # C
+        1: 7,   # N
+        2: 8,   # O
+        3: 9,   # F
+        4: 16,  # S
+        5: 17,  # Cl
+        6: 35,  # Br
+        7: 53,  # I
+        8: 0,   # * (dummy — will be skipped)
+    }
 
-#         Args:
-#             model_name: MACE model size - "small", "medium", or "large"
-#             invariants_only: If True, extract only rotation-invariant features
-#             num_layers: Number of interaction layers to extract (-1 for all)
-#         """
-#         import os
-#         import numpy as np
+    def __init__(
+        self,
+        model_name: str = "small",
+        invariants_only: bool = True,
+        num_layers: int = -1,
+        dataset_normalizer: float = 2.0,
+    ):
+        """Initialize MACE encoder.
 
-#         # E3NN requires this env variable
-#         os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
+        Args:
+            model_name: MACE model size - "small", "medium", or "large"
+            invariants_only: If True, extract only rotation-invariant features
+            num_layers: Number of interaction layers to extract (-1 for all)
+            dataset_normalizer: Coordinate scaling factor (coords * normalizer = Angstroms)
+        """
+        import os
 
-#         super().__init__()
+        import numpy as np
 
-#         from mace.calculators import mace_off
-#         from e3nn import o3
+        os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"] = "1"
 
-#         # Load pretrained MACE model
-#         device = "cuda" if torch.cuda.is_available() else "cpu"
-#         self.calc = mace_off(model_name, device=device)
-#         self.model = self.calc.models[0]
-#         self._device = device
-#         self.model_name = model_name
+        super().__init__()
 
-#         # Freeze model parameters
-#         for param in self.model.parameters():
-#             param.requires_grad = False
+        from e3nn import o3
+        from mace.calculators import mace_off
 
-#         # Calculate encoder_dim based on configuration
-#         self.num_interactions = int(self.model.num_interactions)
-#         self.num_layers = num_layers if num_layers != -1 else self.num_interactions
-#         self.invariants_only = invariants_only
+        self.dataset_normalizer = dataset_normalizer
 
-#         irreps_out = o3.Irreps(str(self.model.products[0].linear.irreps_out))
-#         l_max = irreps_out.lmax
-#         self.num_invariant_features = irreps_out.dim // (l_max + 1) ** 2
-#         self.l_max = l_max
+        # Load pretrained MACE model to CPU; .to(device) handled by caller
+        self.calc = mace_off(model_name, device="cpu")
+        self.mace_model = self.calc.models[0]
+        self.model_name = model_name
 
-#         # Calculate total features to keep
-#         per_layer_features = [irreps_out.dim for _ in range(self.num_interactions)]
-#         per_layer_features[-1] = self.num_invariant_features
-#         self.encoder_dim = int(np.sum(per_layer_features[: self.num_layers]))
+        # Freeze all MACE parameters
+        for param in self.mace_model.parameters():
+            param.requires_grad = False
 
-#         # Atom type mapping: one-hot index -> atomic number
-#         # This should match the atom ordering in your dataset
-#         self.atom_type_map = {
-#             0: 6,  # C
-#             1: 7,  # N
-#             2: 8,  # O
-#             3: 16,  # S
-#             4: 15,  # P
-#             5: 9,  # F
-#             6: 17,  # Cl
-#             7: 35,  # Br
-#             8: 5,  # B
-#             9: 1,  # H
-#             10: 53,  # I
-#             11: 14,  # Si
-#             12: 34,  # Se
-#             13: 52,  # Te
-#         }
+        # Calculate encoder_dim from model architecture
+        self.num_interactions = int(self.mace_model.num_interactions)
+        self._num_layers = num_layers if num_layers != -1 else self.num_interactions
+        self.invariants_only = invariants_only
 
-#     def forward(self, coords, atomics, padding_mask):
-#         """Extract MACE atom embeddings.
+        irreps_out = o3.Irreps(str(self.mace_model.products[0].linear.irreps_out))
+        self.l_max = irreps_out.lmax
+        self.num_invariant_features = irreps_out.dim // (self.l_max + 1) ** 2
 
-#         Args:
-#             coords: [B, N, 3] - atomic coordinates (normalized)
-#             atomics: [B, N, atom_dim] - one-hot atom types
-#             padding_mask: [B, N] - True for padding positions
+        per_layer_features = [irreps_out.dim] * self.num_interactions
+        per_layer_features[-1] = self.num_invariant_features
+        self.encoder_dim = int(np.sum(per_layer_features[: self._num_layers]))
 
-#         Returns:
-#             repr: [B, N, encoder_dim] - atom-level MACE representations
-#         """
-#         import numpy as np
-#         import ase
-#         from mace import data
-#         from mace.modules.utils import extract_invariant
-#         from mace.tools import torch_geometric
+        # Note: mace.data, mace.tools.torch_geometric, and extract_invariant
+        # are imported locally in forward() rather than stored as instance
+        # attributes, because Python module objects are not picklable and
+        # Lightning's save_hyperparameters() deepcopies the model.
 
-#         B, N, _ = coords.shape
-#         device = coords.device
+    def forward(self, coords, atomics, padding_mask, smiles=None):
+        """Extract MACE atom embeddings.
 
-#         # Convert each molecule to ASE Atoms
-#         atoms_list = []
-#         valid_indices = []
-#         atom_counts = []
+        Args:
+            coords: [B, N, 3] - atomic coordinates (normalized by dataset_normalizer)
+            atomics: [B, N, atom_dim] - one-hot atom types
+            padding_mask: [B, N] - True for padding positions
+            smiles: Ignored (accepted for interface compatibility)
 
-#         for i in range(B):
-#             mask = ~padding_mask[i]
-#             n_atoms = mask.sum().item()
+        Returns:
+            repr: [B, N, encoder_dim] - atom-level MACE representations
+        """
+        import ase
+        from mace import data as mace_data
+        from mace.modules.utils import extract_invariant
+        from mace.tools import torch_geometric as mace_tg
 
-#             if n_atoms == 0:
-#                 continue
+        B, N, _ = coords.shape
+        device = coords.device
+        mace_device = next(self.mace_model.parameters()).device
 
-#             # Get atom types (convert one-hot to atomic numbers)
-#             atom_types = atomics[i][mask].argmax(dim=-1).cpu().numpy()
-#             atomic_numbers = [self.atom_type_map.get(int(t), 6) for t in atom_types]
+        # Convert each molecule to ASE Atoms
+        atoms_list = []
+        valid_indices = []
+        atom_counts = []
 
-#             # Get coordinates (rescale - coords are typically normalized by dividing by 2.0)
-#             mol_coords = coords[i][mask].cpu().numpy() * 2.0
+        # Batch-transfer to CPU once
+        coords_cpu = coords.detach().cpu().numpy()
+        atomics_cpu = atomics.detach().cpu()
+        padding_cpu = padding_mask.detach().cpu()
 
-#             # Create ASE Atoms object
-#             atoms = ase.Atoms(numbers=atomic_numbers, positions=mol_coords)
-#             atoms_list.append(atoms)
-#             valid_indices.append(i)
-#             atom_counts.append(n_atoms)
+        for i in range(B):
+            mask = ~padding_cpu[i]
+            n_atoms = mask.sum().item()
 
-#         if len(atoms_list) == 0:
-#             return torch.zeros(B, N, self.encoder_dim, device=device)
+            if n_atoms == 0:
+                continue
 
-#         # Create MACE dataset
-#         keyspec = data.KeySpecification(
-#             info_keys=self.calc.info_keys, arrays_keys=self.calc.arrays_keys
-#         )
+            # Convert one-hot to atomic numbers
+            atom_indices = atomics_cpu[i][mask].argmax(dim=-1).numpy()
+            atomic_numbers = [
+                self.ATOM_INDEX_TO_Z.get(int(t), 6) for t in atom_indices
+            ]
 
-#         configs = [
-#             data.config_from_atoms(x, key_specification=keyspec, head_name=self.calc.head)
-#             for x in atoms_list
-#         ]
+            # Skip dummy atoms (Z=0) — shouldn't happen for real atoms
+            # but guard against padding leaking through
+            real = [(z, j) for j, z in enumerate(atomic_numbers) if z > 0]
+            if not real:
+                continue
+            atomic_numbers = [z for z, _ in real]
+            real_idx = [j for _, j in real]
 
-#         dataset = [
-#             data.AtomicData.from_config(
-#                 config,
-#                 z_table=self.calc.z_table,
-#                 cutoff=self.calc.r_max,
-#                 heads=self.calc.available_heads,
-#             )
-#             for config in configs
-#         ]
+            # Denormalize coordinates back to Angstroms
+            mol_coords = coords_cpu[i][mask.numpy()][real_idx] * self.dataset_normalizer
 
-#         # Create dataloader and process batch
-#         loader = torch_geometric.dataloader.DataLoader(
-#             dataset=dataset,
-#             batch_size=len(dataset),
-#             shuffle=False,
-#             drop_last=False,
-#         )
+            atoms = ase.Atoms(numbers=atomic_numbers, positions=mol_coords)
+            atoms_list.append(atoms)
+            valid_indices.append(i)
+            atom_counts.append(len(atomic_numbers))
 
-#         batch = next(iter(loader)).to(self._device)
+        if len(atoms_list) == 0:
+            return torch.zeros(B, N, self.encoder_dim, device=device, dtype=torch.float32)
 
-#         with torch.no_grad():
-#             output = self.model(batch.to_dict(), compute_force=False)
-#             node_feats = output["node_feats"]
+        # Build MACE batch
+        keyspec = mace_data.KeySpecification(
+            info_keys=self.calc.info_keys, arrays_keys=self.calc.arrays_keys
+        )
+        configs = [
+            mace_data.config_from_atoms(
+                x, key_specification=keyspec, head_name=self.calc.head
+            )
+            for x in atoms_list
+        ]
+        dataset = [
+            mace_data.AtomicData.from_config(
+                config,
+                z_table=self.calc.z_table,
+                cutoff=self.calc.r_max,
+                heads=self.calc.available_heads,
+            )
+            for config in configs
+        ]
 
-#             if self.invariants_only:
-#                 descriptors = extract_invariant(
-#                     node_feats,
-#                     num_layers=self.num_layers,
-#                     num_features=self.num_invariant_features,
-#                     l_max=self.l_max,
-#                 )
-#             else:
-#                 descriptors = node_feats
+        loader = mace_tg.dataloader.DataLoader(
+            dataset=dataset,
+            batch_size=len(dataset),
+            shuffle=False,
+            drop_last=False,
+        )
+        batch = next(iter(loader)).to(mace_device)
 
-#             descriptors = descriptors[:, : self.encoder_dim]
+        with torch.no_grad():
+            output = self.mace_model(batch.to_dict(), compute_force=False)
+            node_feats = output["node_feats"]
 
-#         # Reconstruct batched output with padding
-#         output_tensor = torch.zeros(B, N, self.encoder_dim, device=device)
+            if self.invariants_only:
+                descriptors = extract_invariant(
+                    node_feats,
+                    num_layers=self._num_layers,
+                    num_features=self.num_invariant_features,
+                    l_max=self.l_max,
+                )
+            else:
+                descriptors = node_feats
 
-#         batch_indices = batch["batch"].cpu().numpy()
+            descriptors = descriptors[:, : self.encoder_dim].float()
 
-#         for local_idx, global_idx in enumerate(valid_indices):
-#             # Find atoms belonging to this molecule
-#             atom_mask = batch_indices == local_idx
-#             n_atoms = atom_counts[local_idx]
+        # Reconstruct [B, N, encoder_dim] with padding
+        # Explicitly float32: MACE sets global default to float64
+        output_tensor = torch.zeros(B, N, self.encoder_dim, device=device, dtype=torch.float32)
+        batch_indices = batch["batch"].cpu().numpy()
 
-#             # Copy embeddings to output tensor
-#             output_tensor[global_idx, :n_atoms] = descriptors[atom_mask].to(device)
+        for local_idx, global_idx in enumerate(valid_indices):
+            atom_mask = batch_indices == local_idx
+            n_atoms = atom_counts[local_idx]
+            output_tensor[global_idx, :n_atoms] = descriptors[atom_mask].to(device)
 
-#         return output_tensor
+        return output_tensor
 
 
 class Projector(nn.Module):
