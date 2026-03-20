@@ -462,10 +462,16 @@ class MACEEncoder(MolecularEncoder):
 
         self.dataset_normalizer = dataset_normalizer
 
+        # MACE sets torch.set_default_dtype(float64) globally during init.
+        # Save and restore to avoid contaminating the rest of the process.
+        _prev_dtype = torch.get_default_dtype()
+
         # Load pretrained MACE model to CPU; .to(device) handled by caller
         self.calc = mace_off(model_name, device="cpu")
         self.mace_model = self.calc.models[0]
         self.model_name = model_name
+
+        torch.set_default_dtype(_prev_dtype)
 
         # Freeze all MACE parameters
         for param in self.mace_model.parameters():
@@ -552,49 +558,58 @@ class MACEEncoder(MolecularEncoder):
         if len(atoms_list) == 0:
             return torch.zeros(B, N, self.encoder_dim, device=device, dtype=torch.float32)
 
-        # Build MACE batch
-        keyspec = mace_data.KeySpecification(
-            info_keys=self.calc.info_keys, arrays_keys=self.calc.arrays_keys
-        )
-        configs = [
-            mace_data.config_from_atoms(
-                x, key_specification=keyspec, head_name=self.calc.head
+        # MACE requires float64 for its internal computations (model weights are
+        # float64, and AtomicData.from_config creates tensors using default dtype).
+        # Temporarily set default dtype to float64 for data construction + inference,
+        # then restore the caller's default.
+        _prev_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.float64)
+        try:
+            # Build MACE batch
+            keyspec = mace_data.KeySpecification(
+                info_keys=self.calc.info_keys, arrays_keys=self.calc.arrays_keys
             )
-            for x in atoms_list
-        ]
-        dataset = [
-            mace_data.AtomicData.from_config(
-                config,
-                z_table=self.calc.z_table,
-                cutoff=self.calc.r_max,
-                heads=self.calc.available_heads,
-            )
-            for config in configs
-        ]
-
-        loader = mace_tg.dataloader.DataLoader(
-            dataset=dataset,
-            batch_size=len(dataset),
-            shuffle=False,
-            drop_last=False,
-        )
-        batch = next(iter(loader)).to(mace_device)
-
-        with torch.no_grad():
-            output = self.mace_model(batch.to_dict(), compute_force=False)
-            node_feats = output["node_feats"]
-
-            if self.invariants_only:
-                descriptors = extract_invariant(
-                    node_feats,
-                    num_layers=self._num_layers,
-                    num_features=self.num_invariant_features,
-                    l_max=self.l_max,
+            configs = [
+                mace_data.config_from_atoms(
+                    x, key_specification=keyspec, head_name=self.calc.head
                 )
-            else:
-                descriptors = node_feats
+                for x in atoms_list
+            ]
+            dataset = [
+                mace_data.AtomicData.from_config(
+                    config,
+                    z_table=self.calc.z_table,
+                    cutoff=self.calc.r_max,
+                    heads=self.calc.available_heads,
+                )
+                for config in configs
+            ]
 
-            descriptors = descriptors[:, : self.encoder_dim].float()
+            loader = mace_tg.dataloader.DataLoader(
+                dataset=dataset,
+                batch_size=len(dataset),
+                shuffle=False,
+                drop_last=False,
+            )
+            batch = next(iter(loader)).to(mace_device)
+
+            with torch.no_grad():
+                output = self.mace_model(batch.to_dict(), compute_force=False)
+                node_feats = output["node_feats"]
+
+                if self.invariants_only:
+                    descriptors = extract_invariant(
+                        node_feats,
+                        num_layers=self._num_layers,
+                        num_features=self.num_invariant_features,
+                        l_max=self.l_max,
+                    )
+                else:
+                    descriptors = node_feats
+
+                descriptors = descriptors[:, : self.encoder_dim].float()
+        finally:
+            torch.set_default_dtype(_prev_dtype)
 
         # Reconstruct [B, N, encoder_dim] with padding
         # Explicitly float32: MACE sets global default to float64
