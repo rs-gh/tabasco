@@ -621,8 +621,11 @@ class MACEEncoder(MolecularEncoder):
         return output_tensor
 
 
-class CachedMACEEncoder(MolecularEncoder):
+class CachedMACEEncoder(MACEEncoder):
     """MACE encoder backed by pre-computed embeddings keyed by LMDB index.
+
+    Inherits from MACEEncoder so state_dict keys match exactly, allowing
+    checkpoint resume from a live MACEEncoder run with strict=True.
 
     Unlike CachedChemPropEncoder (keyed by SMILES, since CheMeleon is 2D),
     MACE is 3D-aware so different conformers produce different embeddings.
@@ -639,7 +642,7 @@ class CachedMACEEncoder(MolecularEncoder):
     3. Swap MACEEncoder -> CachedMACEEncoder in the experiment config.
 
     For entries not present in the cache (e.g. validation molecules not
-    pre-computed) the encoder falls back to on-the-fly MACEEncoder.
+    pre-computed) the encoder falls back to on-the-fly MACEEncoder.forward().
     """
 
     def __init__(
@@ -655,10 +658,11 @@ class CachedMACEEncoder(MolecularEncoder):
                 run; default 192 matches MACE-OFF small).
             fallback_model_name: MACE model size for cache misses.
         """
-        super().__init__()
+        # Initialize parent MACEEncoder — gives us self.mace_model with
+        # the same state_dict keys, enabling strict checkpoint loading.
+        super().__init__(model_name=fallback_model_name)
         import lmdb as _lmdb
 
-        self.encoder_dim = encoder_dim
         self._lmdb_path = lmdb_path
         self._db = _lmdb.open(
             lmdb_path,
@@ -670,10 +674,6 @@ class CachedMACEEncoder(MolecularEncoder):
             readahead=False,
             meminit=False,
         )
-        # Fallback encoder for entries not found in the pre-computed cache.
-        self._fallback = MACEEncoder(model_name=fallback_model_name)
-        for p in self._fallback.parameters():
-            p.requires_grad = False
 
     def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
         """Look up pre-computed embeddings; fall back to on-the-fly for misses.
@@ -693,12 +693,12 @@ class CachedMACEEncoder(MolecularEncoder):
 
         B, N, _ = coords.shape
         device = coords.device
-        output = torch.zeros(B, N, self.encoder_dim, device=device)
 
         if lmdb_keys is None:
-            # No keys — use fallback for entire batch.
-            return self._fallback(coords, atomics, padding_mask)
+            # No keys — use parent MACEEncoder for entire batch.
+            return super().forward(coords, atomics, padding_mask)
 
+        output = torch.zeros(B, N, self.encoder_dim, device=device)
         hit_indices, miss_indices = [], []
         with self._db.begin() as txn:
             for i, key in enumerate(lmdb_keys):
@@ -717,7 +717,7 @@ class CachedMACEEncoder(MolecularEncoder):
             miss_atomics = atomics[miss_indices]
             miss_padding = padding_mask[miss_indices]
             with torch.no_grad():
-                miss_repr = self._fallback(
+                miss_repr = super().forward(
                     miss_coords, miss_atomics, miss_padding
                 )
             for local_i, global_i in enumerate(miss_indices):
