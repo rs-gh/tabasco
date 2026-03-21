@@ -9,7 +9,7 @@ from tabasco.chem.convert import MoleculeConverter
 class MolecularEncoder(nn.Module):
     """Base class for frozen molecular encoders used in REPA."""
 
-    def forward(self, coords, atomics, padding_mask, smiles=None):
+    def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
         """Extract representations from molecules.
 
         Args:
@@ -48,7 +48,7 @@ class DummyEncoder(MolecularEncoder):
             nn.Linear(hidden_dim, encoder_dim),
         )
 
-    def forward(self, coords, atomics, padding_mask, smiles=None):
+    def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
         """Encode coordinates with simple MLP.
 
         Args:
@@ -191,7 +191,7 @@ class ChemPropEncoder(MolecularEncoder):
 
         return torch.load(model_path, map_location="cpu", weights_only=True)
 
-    def forward(self, coords, atomics, padding_mask, smiles=None):
+    def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
         """Extract ChemProp atom embeddings.
 
         Args:
@@ -356,7 +356,7 @@ class CachedChemPropEncoder(MolecularEncoder):
         for p in self._fallback.parameters():
             p.requires_grad = False
 
-    def forward(self, coords, atomics, padding_mask, smiles=None):
+    def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
         """Look up pre-computed embeddings; fall back to on-the-fly for misses.
 
         Args:
@@ -496,7 +496,7 @@ class MACEEncoder(MolecularEncoder):
         # attributes, because Python module objects are not picklable and
         # Lightning's save_hyperparameters() deepcopies the model.
 
-    def forward(self, coords, atomics, padding_mask, smiles=None):
+    def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
         """Extract MACE atom embeddings.
 
         Args:
@@ -619,6 +619,111 @@ class MACEEncoder(MolecularEncoder):
             output_tensor[global_idx, :n_atoms] = descriptors[atom_mask]
 
         return output_tensor
+
+
+class CachedMACEEncoder(MolecularEncoder):
+    """MACE encoder backed by pre-computed embeddings keyed by LMDB index.
+
+    Unlike CachedChemPropEncoder (keyed by SMILES, since CheMeleon is 2D),
+    MACE is 3D-aware so different conformers produce different embeddings.
+    Cache is keyed by the source LMDB key (unique per conformer).
+
+    MACE is rotation-invariant (l_max=0, invariants_only=True), so
+    pre-computed embeddings are valid for any rotation of the same conformer.
+
+    Usage
+    -----
+    1. Run playground/tabasco/mace/precompute_embeddings.py once to build
+       the embedding LMDB from all training conformers.
+    2. Point this encoder at that LMDB via the ``lmdb_path`` constructor arg.
+    3. Swap MACEEncoder -> CachedMACEEncoder in the experiment config.
+
+    For entries not present in the cache (e.g. validation molecules not
+    pre-computed) the encoder falls back to on-the-fly MACEEncoder.
+    """
+
+    def __init__(
+        self,
+        lmdb_path: str,
+        encoder_dim: int = 192,
+        fallback_model_name: str = "small",
+    ):
+        """Args:
+            lmdb_path: Path to the pre-computed embedding LMDB produced by
+                playground/tabasco/mace/precompute_embeddings.py.
+            encoder_dim: Embedding dimensionality (must match the pre-compute
+                run; default 192 matches MACE-OFF small).
+            fallback_model_name: MACE model size for cache misses.
+        """
+        super().__init__()
+        import lmdb as _lmdb
+
+        self.encoder_dim = encoder_dim
+        self._lmdb_path = lmdb_path
+        self._db = _lmdb.open(
+            lmdb_path,
+            map_size=100 * (1024 ** 3),  # 100 GB map (virtual, not RSS)
+            create=False,
+            subdir=False,
+            readonly=True,
+            lock=False,
+            readahead=False,
+            meminit=False,
+        )
+        # Fallback encoder for entries not found in the pre-computed cache.
+        self._fallback = MACEEncoder(model_name=fallback_model_name)
+        for p in self._fallback.parameters():
+            p.requires_grad = False
+
+    def forward(self, coords, atomics, padding_mask, smiles=None, lmdb_keys=None):
+        """Look up pre-computed embeddings; fall back to on-the-fly for misses.
+
+        Args:
+            coords: [B, N, 3]  (only used for fallback molecules)
+            atomics: [B, N, atom_dim]  (only used for fallback molecules)
+            padding_mask: [B, N]
+            smiles: Ignored (accepted for interface compatibility)
+            lmdb_keys: list of B LMDB key strings (required for cache lookup)
+
+        Returns:
+            repr: [B, N, encoder_dim]
+        """
+        import pickle
+        import numpy as np
+
+        B, N, _ = coords.shape
+        device = coords.device
+        output = torch.zeros(B, N, self.encoder_dim, device=device)
+
+        if lmdb_keys is None:
+            # No keys — use fallback for entire batch.
+            return self._fallback(coords, atomics, padding_mask)
+
+        hit_indices, miss_indices = [], []
+        with self._db.begin() as txn:
+            for i, key in enumerate(lmdb_keys):
+                val = txn.get(key.encode()) if key else None
+                if val is not None:
+                    emb = pickle.loads(val)  # float16 [n_atoms, D]
+                    emb_t = torch.from_numpy(emb.astype(np.float32)).to(device)
+                    n = min(emb_t.shape[0], N)
+                    output[i, :n] = emb_t[:n]
+                    hit_indices.append(i)
+                else:
+                    miss_indices.append(i)
+
+        if miss_indices:
+            miss_coords = coords[miss_indices]
+            miss_atomics = atomics[miss_indices]
+            miss_padding = padding_mask[miss_indices]
+            with torch.no_grad():
+                miss_repr = self._fallback(
+                    miss_coords, miss_atomics, miss_padding
+                )
+            for local_i, global_i in enumerate(miss_indices):
+                output[global_i] = miss_repr[local_i]
+
+        return output
 
 
 class Projector(nn.Module):

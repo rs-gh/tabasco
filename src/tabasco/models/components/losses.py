@@ -193,12 +193,18 @@ class REPALoss(nn.Module):
         except KeyError:
             smiles = None
 
+        try:
+            lmdb_keys = list(path.x_1.get_non_tensor("lmdb_key"))
+        except KeyError:
+            lmdb_keys = None
+
         with torch.no_grad():
             target_repr = self.encoder(
                 path.x_1["coords"],  # Clean coordinates
                 path.x_1["atomics"],  # Clean atom types
                 padding_mask,
                 smiles=smiles,
+                lmdb_keys=lmdb_keys,
             )  # [B, N, encoder_dim]
 
         # Fuse hidden states: concatenate along feature dimension.

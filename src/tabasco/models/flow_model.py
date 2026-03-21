@@ -35,6 +35,7 @@ class FlowMatchingModel(nn.Module):
         num_random_augmentations: Optional[int] = None,
         sample_schedule: str = "linear",
         compile: bool = False,
+        compile_mode: str = "default",
     ):
         """Args:
         net: The neural network predicting velocity fields.
@@ -49,12 +50,14 @@ class FlowMatchingModel(nn.Module):
         num_random_augmentations: Number of random rotations per sample.
         sample_schedule: `linear`, `power`, or `log` schedule in `sample`.
         compile: If True, passes the network through `torch.compile`.
+        compile_mode: torch.compile mode - "default", "reduce-overhead"
+            (CUDA graphs), or "max-autotune".
         """
         super().__init__()
         self.net = net
 
         if compile:
-            self.net = torch.compile(self.net)
+            self.net = torch.compile(self.net, mode=compile_mode)
 
         self.atomics_interpolant = atomics_interpolant
         self.coords_interpolant = coords_interpolant

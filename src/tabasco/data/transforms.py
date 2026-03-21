@@ -97,4 +97,10 @@ def apply_random_rotation(batch: TensorDict, n_augmentations=10) -> TensorDict:
     except KeyError:
         pass
 
+    try:
+        orig_keys = list(batch.get_non_tensor("lmdb_key"))
+        augmented_batch.set_non_tensor("lmdb_key", orig_keys * naug)
+    except KeyError:
+        pass
+
     return augmented_batch

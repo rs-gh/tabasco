@@ -233,4 +233,7 @@ class UnconditionalLMDBDataset(BaseLMDBDataset):
         except Exception:
             pass
 
+        # Propagate the raw LMDB key for cache-based encoders (e.g. CachedMACEEncoder).
+        data_tensor.set_non_tensor("lmdb_key", self.keys[index].decode())
+
         return data_tensor

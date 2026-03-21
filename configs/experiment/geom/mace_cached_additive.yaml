@@ -1,0 +1,27 @@
+# @package _global_
+defaults:
+  - /experiment/geom/mild
+
+tags: ["geom", "repa", "mace-cached", "additive"]
+
+model:
+  repa_loss:
+    _target_: tabasco.models.components.losses.REPALoss
+    lambda_repa: 0.8
+    combination_mode: additive
+    similarity_type: cosine
+    time_weighting: false
+    encoder:
+      _target_: tabasco.models.components.encoders.CachedMACEEncoder
+      lmdb_path: ${paths.root_dir}/data/mace_geom/train_embeddings.lmdb
+      encoder_dim: 192
+      fallback_model_name: small
+    projector:
+      _target_: tabasco.models.components.encoders.Projector
+      hidden_dim: ${model.net.hidden_dim}
+      encoder_dim: 192  # MACE small: 96 features/layer x 2 layers
+
+logger:
+  wandb:
+    name: "${now:%m%d-%H%M}-tabasco-geom-mace-cached-additive"
+    project: "tabasco"
