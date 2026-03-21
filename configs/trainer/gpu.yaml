@@ -3,3 +3,6 @@ defaults:
 
 accelerator: gpu
 devices: 1
+
+# fp16 AMP: uses tensor cores on Ampere+ GPUs
+precision: 16

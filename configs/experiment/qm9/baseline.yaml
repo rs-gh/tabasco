@@ -30,7 +30,7 @@ model:
     implementation: reimplemented
     cross_attention: true
   repa_loss: null  # No REPA loss for baseline
-  compile: true
+  compile: true  # also default in flow_model.yaml; mixed precision via gpu.yaml
 
 callbacks:
   ema:

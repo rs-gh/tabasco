@@ -466,9 +466,10 @@ class MACEEncoder(MolecularEncoder):
         # Save and restore to avoid contaminating the rest of the process.
         _prev_dtype = torch.get_default_dtype()
 
-        # Load pretrained MACE model to CPU; .to(device) handled by caller
+        # Load pretrained MACE model; init on CPU, then cast to float32.
+        # Lightning's .to(device) will move it to GPU when the trainer starts.
         self.calc = mace_off(model_name, device="cpu")
-        self.mace_model = self.calc.models[0]
+        self.mace_model = self.calc.models[0].float()
         self.model_name = model_name
 
         torch.set_default_dtype(_prev_dtype)
@@ -516,12 +517,11 @@ class MACEEncoder(MolecularEncoder):
         device = coords.device
         mace_device = next(self.mace_model.parameters()).device
 
-        # Convert each molecule to ASE Atoms
+        # Convert each molecule to ASE Atoms (requires CPU/numpy)
         atoms_list = []
         valid_indices = []
         atom_counts = []
 
-        # Batch-transfer to CPU once
         coords_cpu = coords.detach().cpu().numpy()
         atomics_cpu = atomics.detach().cpu()
         padding_cpu = padding_mask.detach().cpu()
@@ -558,14 +558,12 @@ class MACEEncoder(MolecularEncoder):
         if len(atoms_list) == 0:
             return torch.zeros(B, N, self.encoder_dim, device=device, dtype=torch.float32)
 
-        # MACE requires float64 for its internal computations (model weights are
-        # float64, and AtomicData.from_config creates tensors using default dtype).
-        # Temporarily set default dtype to float64 for data construction + inference,
-        # then restore the caller's default.
+        # Build MACE AtomicData objects. MACE's data pipeline reads
+        # torch.get_default_dtype(), so we temporarily set float32 to match
+        # the model weights (cast from float64 at init).
         _prev_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float64)
+        torch.set_default_dtype(torch.float32)
         try:
-            # Build MACE batch
             keyspec = mace_data.KeySpecification(
                 info_keys=self.calc.info_keys, arrays_keys=self.calc.arrays_keys
             )
@@ -612,14 +610,13 @@ class MACEEncoder(MolecularEncoder):
             torch.set_default_dtype(_prev_dtype)
 
         # Reconstruct [B, N, encoder_dim] with padding
-        # Explicitly float32: MACE sets global default to float64
         output_tensor = torch.zeros(B, N, self.encoder_dim, device=device, dtype=torch.float32)
-        batch_indices = batch["batch"].cpu().numpy()
+        batch_indices = batch["batch"]
 
         for local_idx, global_idx in enumerate(valid_indices):
             atom_mask = batch_indices == local_idx
             n_atoms = atom_counts[local_idx]
-            output_tensor[global_idx, :n_atoms] = descriptors[atom_mask].to(device)
+            output_tensor[global_idx, :n_atoms] = descriptors[atom_mask]
 
         return output_tensor
 
