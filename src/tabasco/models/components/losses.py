@@ -218,17 +218,27 @@ class REPALoss(nn.Module):
             cos_sim = F.cosine_similarity(
                 projected[real_mask], target_repr[real_mask], dim=-1
             )
-            loss = -cos_sim.mean()
+            if self.time_weighting:
+                # Per-sample time weighting: expand t from [B] to [B, N],
+                # then mask to [total_real_atoms] matching cos_sim shape.
+                # t close to 1 → clean molecule → higher weight.
+                # Uses mean(cos_sim_i * t_i) rather than the old mean(cos_sim) * mean(t),
+                # which preserves per-sample correlation between similarity and timestep.
+                t = path.t.view(-1)  # [B]
+                t_expanded = t.unsqueeze(1).expand_as(real_mask)  # [B, N]
+                t_weights = t_expanded[real_mask]  # [total_real_atoms]
+                loss = -(cos_sim * t_weights).mean()
+            else:
+                loss = -cos_sim.mean()
         else:
-            loss = F.mse_loss(projected[real_mask], target_repr[real_mask])
-
-        # Optional: weight by time (stronger alignment for cleaner molecules)
-        if self.time_weighting:
-            # t close to 1 → clean molecule → higher weight
-            # t close to 0 → noise → lower weight
-            # Simple approach: use mean time as weight
-            time_weight = path.t.mean()
-            loss = loss * time_weight
+            if self.time_weighting:
+                per_atom_mse = (projected[real_mask] - target_repr[real_mask]).pow(2).mean(dim=-1)
+                t = path.t.view(-1)
+                t_expanded = t.unsqueeze(1).expand_as(real_mask)
+                t_weights = t_expanded[real_mask]
+                loss = (per_atom_mse * t_weights).mean()
+            else:
+                loss = F.mse_loss(projected[real_mask], target_repr[real_mask])
 
         if compute_stats:
             stats_dict["repa_loss"] = loss.item()
