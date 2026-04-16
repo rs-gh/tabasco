@@ -132,6 +132,7 @@ class REPALoss(nn.Module):
         time_weighting: bool = False,
         similarity_type: str = "cosine",
         combination_mode: str = "additive",
+        averaging: str = "per_sample",
     ):
         """Initialize REPA loss.
 
@@ -149,9 +150,13 @@ class REPALoss(nn.Module):
             combination_mode: How to combine REPA loss with diffusion loss.
                 "additive": total = diffusion + lambda_repa * repa  (REPA as regularizer)
                 "tradeoff": total = (1 - lambda_repa) * diffusion + lambda_repa * repa  (convex combination)
+            averaging: "per_sample" (paper default — each molecule contributes equally)
+                or "per_atom" (global mean over all unmasked atoms).
         """
         if combination_mode not in ("additive", "tradeoff"):
             raise ValueError(f"combination_mode must be 'additive' or 'tradeoff', got '{combination_mode}'")
+        if averaging not in ("per_sample", "per_atom"):
+            raise ValueError(f"averaging must be 'per_sample' or 'per_atom', got '{averaging}'")
         super().__init__()
         self.encoder = encoder
         self.projector = projector
@@ -159,10 +164,62 @@ class REPALoss(nn.Module):
         self.time_weighting = time_weighting
         self.similarity_type = similarity_type
         self.combination_mode = combination_mode
+        self.averaging = averaging
 
         # Freeze encoder to prevent co-adaptation
         for param in self.encoder.parameters():
             param.requires_grad = False
+
+    def _cosine_loss(self, projected, target_repr, real_mask, t):
+        """Compute negative cosine similarity loss with the configured averaging."""
+        if self.averaging == "per_sample":
+            b = projected.shape[0]
+            per_sample_losses = []
+            for b_idx in range(b):
+                m = real_mask[b_idx]
+                if not m.any():
+                    continue
+                cs = F.cosine_similarity(
+                    projected[b_idx, m], target_repr[b_idx, m], dim=-1
+                )
+                sample_loss = -cs.mean()
+                if t is not None:
+                    sample_loss = sample_loss * t[b_idx]
+                per_sample_losses.append(sample_loss)
+            return torch.stack(per_sample_losses).mean()
+        else:
+            # per_atom: global mean over all unmasked atoms
+            cos_sim = F.cosine_similarity(
+                projected[real_mask], target_repr[real_mask], dim=-1
+            )
+            if t is not None:
+                t_expanded = t.unsqueeze(1).expand_as(real_mask)
+                t_weights = t_expanded[real_mask]
+                return -(cos_sim * t_weights).mean()
+            return -cos_sim.mean()
+
+    def _mse_loss(self, projected, target_repr, real_mask, t):
+        """Compute MSE loss with the configured averaging."""
+        if self.averaging == "per_sample":
+            b = projected.shape[0]
+            per_sample_losses = []
+            for b_idx in range(b):
+                m = real_mask[b_idx]
+                if not m.any():
+                    continue
+                sample_loss = F.mse_loss(projected[b_idx, m], target_repr[b_idx, m])
+                if t is not None:
+                    sample_loss = sample_loss * t[b_idx]
+                per_sample_losses.append(sample_loss)
+            return torch.stack(per_sample_losses).mean()
+        else:
+            # per_atom: global mean
+            if t is not None:
+                per_atom_mse = (projected[real_mask] - target_repr[real_mask]).pow(2).mean(dim=-1)
+                t_expanded = t.unsqueeze(1).expand_as(real_mask)
+                t_weights = t_expanded[real_mask]
+                return (per_atom_mse * t_weights).mean()
+            return F.mse_loss(projected[real_mask], target_repr[real_mask])
 
     def forward(self, path: FlowPath, pred: TensorDict, compute_stats: bool = True):
         """Compute REPA alignment loss.
@@ -214,31 +271,12 @@ class REPALoss(nn.Module):
         projected = self.projector(h_fused)  # [B, N, encoder_dim]
 
         stats_dict = {}
+        t = path.t.view(-1) if self.time_weighting else None  # [B]
+
         if self.similarity_type == "cosine":
-            cos_sim = F.cosine_similarity(
-                projected[real_mask], target_repr[real_mask], dim=-1
-            )
-            if self.time_weighting:
-                # Per-sample time weighting: expand t from [B] to [B, N],
-                # then mask to [total_real_atoms] matching cos_sim shape.
-                # t close to 1 → clean molecule → higher weight.
-                # Uses mean(cos_sim_i * t_i) rather than the old mean(cos_sim) * mean(t),
-                # which preserves per-sample correlation between similarity and timestep.
-                t = path.t.view(-1)  # [B]
-                t_expanded = t.unsqueeze(1).expand_as(real_mask)  # [B, N]
-                t_weights = t_expanded[real_mask]  # [total_real_atoms]
-                loss = -(cos_sim * t_weights).mean()
-            else:
-                loss = -cos_sim.mean()
+            loss = self._cosine_loss(projected, target_repr, real_mask, t)
         else:
-            if self.time_weighting:
-                per_atom_mse = (projected[real_mask] - target_repr[real_mask]).pow(2).mean(dim=-1)
-                t = path.t.view(-1)
-                t_expanded = t.unsqueeze(1).expand_as(real_mask)
-                t_weights = t_expanded[real_mask]
-                loss = (per_atom_mse * t_weights).mean()
-            else:
-                loss = F.mse_loss(projected[real_mask], target_repr[real_mask])
+            loss = self._mse_loss(projected, target_repr, real_mask, t)
 
         if compute_stats:
             stats_dict["repa_loss"] = loss.item()

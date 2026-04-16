@@ -25,6 +25,7 @@ model:
       _target_: tabasco.models.components.encoders.Projector
       hidden_dim: ${model.net.hidden_dim}
       encoder_dim: 2048  # CheMeleon's hidden dimension
+      num_layers: 3
 
 logger:
   wandb:

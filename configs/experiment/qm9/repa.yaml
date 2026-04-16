@@ -17,6 +17,7 @@ model:
       _target_: tabasco.models.components.encoders.Projector
       hidden_dim: ${model.net.hidden_dim}
       encoder_dim: 256
+      num_layers: 3
 
 logger:
   wandb:
