@@ -132,7 +132,7 @@ class REPALoss(nn.Module):
         time_weighting: bool = False,
         similarity_type: str = "cosine",
         combination_mode: str = "additive",
-        averaging: str = "per_sample",
+        averaging: str = "per_atom",
     ):
         """Initialize REPA loss.
 
@@ -150,8 +150,11 @@ class REPALoss(nn.Module):
             combination_mode: How to combine REPA loss with diffusion loss.
                 "additive": total = diffusion + lambda_repa * repa  (REPA as regularizer)
                 "tradeoff": total = (1 - lambda_repa) * diffusion + lambda_repa * repa  (convex combination)
-            averaging: "per_sample" (paper default — each molecule contributes equally)
-                or "per_atom" (global mean over all unmasked atoms).
+            averaging: "per_atom" (project default — global mean over all unmasked atoms)
+                or "per_sample" (each molecule contributes equally regardless of size).
+                Note: the reference REPA paper averages per-patch, which equals per-sample only
+                when every image has the same number of patches. In variable-length domains the
+                two diverge; the paper gives no guidance on which to prefer.
         """
         if combination_mode not in ("additive", "tradeoff"):
             raise ValueError(f"combination_mode must be 'additive' or 'tradeoff', got '{combination_mode}'")
