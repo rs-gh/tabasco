@@ -89,7 +89,7 @@ def apply_random_rotation(batch: TensorDict, n_augmentations=10) -> TensorDict:
 
     # Propagate non-tensor fields (e.g. SMILES strings).  TensorDict's tensor ops
     # (repeat, matmul, etc.) don't copy non-tensor fields, so we do it manually.
-    # coords.repeat(naug, 1, 1) is block-wise: [mol0..mol_{B-1}] × naug, so
+    # coords.repeat(naug, 1, 1) is block-wise: [mol0..mol_{B-1}] x naug, so
     # repeat the SMILES list the same way.
     try:
         orig_smiles = list(batch.get_non_tensor("smiles"))

@@ -150,7 +150,7 @@ class REPALoss(nn.Module):
             combination_mode: How to combine REPA loss with diffusion loss.
                 "additive": total = diffusion + lambda_repa * repa  (REPA as regularizer)
                 "tradeoff": total = (1 - lambda_repa) * diffusion + lambda_repa * repa  (convex combination)
-            averaging: "per_atom" (project default — global mean over all unmasked atoms)
+            averaging: "per_atom" (project default - global mean over all unmasked atoms)
                 or "per_sample" (each molecule contributes equally regardless of size).
                 Note: the reference REPA paper averages per-patch, which equals per-sample only
                 when every image has the same number of patches. In variable-length domains the

@@ -218,7 +218,7 @@ class UnconditionalLMDBDataset(BaseLMDBDataset):
         #
         # We compute on-the-fly here (~0.1 ms/mol): the mol is already in hand
         # from the LMDB read, so MolToSmiles is just serialising an existing bond
-        # graph — much cheaper than the DetermineConnectivity call it replaces.
+        # graph - much cheaper than the DetermineConnectivity call it replaces.
         #
         # NOTE: self.all_smiles[index] is WRONG for this purpose.  all_smiles was
         # built in numeric insertion order during _process() (0, 1, 2, ...), but

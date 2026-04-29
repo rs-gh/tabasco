@@ -10,7 +10,7 @@ class BaseTimeFactor(nn.Module, ABC):
     Args:
         max_value: Upper clamp for the time-factor value.
         min_value: Lower clamp for the time-factor value.
-        zero_before: If *t* ≤ this threshold the factor is forced to zero.
+        zero_before: If *t* <= this threshold the factor is forced to zero.
         eps: Small constant to avoid division by zero.
     """
 

@@ -214,7 +214,7 @@ class ChemPropEncoder(MolecularEncoder):
         device = coords.device
 
         # RDKit/ChemProp operations are CPU-bound. Moving tensors to CPU once
-        # here avoids ~25,000 implicit GPU→CPU synchronisations per forward
+        # here avoids ~25,000 implicit GPU->CPU synchronisations per forward
         # pass that would otherwise arise from .item() calls and element-wise
         # iteration over CUDA tensors inside _make_mol_simple_imputation and
         # _get_atom_types (each call to coords[i,j].item() stalls the GPU).
@@ -231,7 +231,7 @@ class ChemPropEncoder(MolecularEncoder):
 
             # Fast path: build from SMILES and use per-SMILES MolGraph cache.
             # ChemProp is a 2-D GNN so the MolGraph is identical for every
-            # conformer of the same molecule — caching is exact, not approximate.
+            # conformer of the same molecule - caching is exact, not approximate.
             if smi is not None:
                 cached = self._molgraph_cache.get(smi)
                 if cached is not None:
@@ -322,7 +322,7 @@ class CachedChemPropEncoder(MolecularEncoder):
     1. Run playground/tabasco/chemeleon/precompute_embeddings.py once to build
        the embedding LMDB from all training SMILES.
     2. Point this encoder at that LMDB via the `lmdb_path` constructor arg.
-    3. Swap ChemPropEncoder → CachedChemPropEncoder in the experiment config.
+    3. Swap ChemPropEncoder -> CachedChemPropEncoder in the experiment config.
 
     For SMILES not present in the cache (e.g. validation molecules not seen
     during pre-computation) the encoder falls back to on-the-fly CheMeleon.
@@ -376,7 +376,7 @@ class CachedChemPropEncoder(MolecularEncoder):
         output = torch.zeros(B, N, self.encoder_dim, device=device)
 
         if smiles is None:
-            # No SMILES — use fallback for entire batch.
+            # No SMILES - use fallback for entire batch.
             return self._fallback(coords, atomics, padding_mask)
 
         hit_indices, miss_indices = [], []
@@ -431,7 +431,7 @@ class MACEEncoder(MolecularEncoder):
         5: 17,  # Cl
         6: 35,  # Br
         7: 53,  # I
-        8: 0,   # * (dummy — will be skipped)
+        8: 0,   # * (dummy - will be skipped)
     }
 
     def __init__(
@@ -539,7 +539,7 @@ class MACEEncoder(MolecularEncoder):
                 self.ATOM_INDEX_TO_Z.get(int(t), 6) for t in atom_indices
             ]
 
-            # Skip dummy atoms (Z=0) — shouldn't happen for real atoms
+            # Skip dummy atoms (Z=0) - shouldn't happen for real atoms
             # but guard against padding leaking through
             real = [(z, j) for j, z in enumerate(atomic_numbers) if z > 0]
             if not real:
@@ -658,7 +658,7 @@ class CachedMACEEncoder(MACEEncoder):
                 run; default 192 matches MACE-OFF small).
             fallback_model_name: MACE model size for cache misses.
         """
-        # Initialize parent MACEEncoder — gives us self.mace_model with
+        # Initialize parent MACEEncoder - gives us self.mace_model with
         # the same state_dict keys, enabling strict checkpoint loading.
         super().__init__(model_name=fallback_model_name)
         import lmdb as _lmdb
@@ -695,7 +695,7 @@ class CachedMACEEncoder(MACEEncoder):
         device = coords.device
 
         if lmdb_keys is None:
-            # No keys — use parent MACEEncoder for entire batch.
+            # No keys - use parent MACEEncoder for entire batch.
             return super().forward(coords, atomics, padding_mask)
 
         output = torch.zeros(B, N, self.encoder_dim, device=device)

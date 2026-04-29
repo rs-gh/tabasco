@@ -14,7 +14,7 @@ import torch.nn.functional as F
 
 
 class Interpolant(ABC):
-    """Abstract base class for data–noise interpolation.
+    """Abstract base class for data-noise interpolation.
 
     Subclasses must implement four domain-specific operations:
     1. sample_noise:    draw a noise tensor matching the data layout;
@@ -131,7 +131,7 @@ class DiscreteInterpolant(Interpolant):
         """Return uniformly random one-hot noise.
 
         Args:
-            shape: Desired output shape `(…, C)` where `C` equals the number of discrete categories.
+            shape: Desired output shape `(..., C)` where `C` equals the number of discrete categories.
             pad_mask: Padding mask; rows with 1s are ignored and set to zeros.
 
         Returns:

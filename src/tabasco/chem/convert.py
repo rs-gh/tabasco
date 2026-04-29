@@ -125,9 +125,9 @@ class MoleculeConverter:
 
         Returns:
             TensorDict with keys:
-                • `coords`:         `(N, 3)` float32
-                • `atomics`:        `(N, n_elements)` one-hot
-                • `padding_mask`:   `(N,)` bool (optional)
+                * `coords`:         `(N, 3)` float32
+                * `atomics`:        `(N, n_elements)` one-hot
+                * `padding_mask`:   `(N,)` bool (optional)
         """
 
         if remove_hydrogens:

@@ -168,7 +168,7 @@ class MolecularNovelty(Metric):
 
 
 class MolecularDiversity(Metric):
-    """Mean pair-wise fingerprint distance (higher ⇒ more diverse).
+    """Mean pair-wise fingerprint distance (higher => more diverse).
 
     Uses `datamol.pdist` with fingerprints such as ECFP; see
     `datamol.list_supported_fingerprints()` for available types.
@@ -398,7 +398,7 @@ class PoseBustersValidity(Metric):
                 override the default PoseBusters YAML.
 
         Note:
-            Strain-energy evaluation is very slow—omit it during training
+            Strain-energy evaluation is very slow-omit it during training
             unless strictly required (see the YAML in `utils/posebusters_no_strain.yaml`).
         """
         super().__init__(**kwargs)
