@@ -1,6 +1,6 @@
 # @package _global_
 # Chemprop experiment using pre-computed CheMeleon embeddings.
-# Run playground/tabasco/chemeleon/precompute_embeddings.py first to build the
+# Run encoder_profiling/tabasco/chemeleon/precompute_embeddings.py first to build the
 # embedding LMDB, then use this config instead of geom/chemprop.
 #
 # Expected speedup: encoder step drops from ~7 s → ~5 ms (lookup only),

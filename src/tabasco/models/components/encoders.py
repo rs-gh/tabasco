@@ -319,7 +319,7 @@ class CachedChemPropEncoder(MolecularEncoder):
 
     Usage
     -----
-    1. Run playground/tabasco/chemeleon/precompute_embeddings.py once to build
+    1. Run encoder_profiling/tabasco/chemeleon/precompute_embeddings.py once to build
        the embedding LMDB from all training SMILES.
     2. Point this encoder at that LMDB via the `lmdb_path` constructor arg.
     3. Swap ChemPropEncoder -> CachedChemPropEncoder in the experiment config.
@@ -331,7 +331,7 @@ class CachedChemPropEncoder(MolecularEncoder):
     def __init__(self, lmdb_path: str, encoder_dim: int = 2048):
         """Args:
             lmdb_path: Path to the pre-computed embedding LMDB produced by
-                playground/tabasco/chemeleon/precompute_embeddings.py.
+                encoder_profiling/tabasco/chemeleon/precompute_embeddings.py.
             encoder_dim: Embedding dimensionality (must match the pre-compute
                 run; default 2048 matches CheMeleon).
         """
@@ -636,7 +636,7 @@ class CachedMACEEncoder(MACEEncoder):
 
     Usage
     -----
-    1. Run playground/tabasco/mace/precompute_embeddings.py once to build
+    1. Run encoder_profiling/tabasco/mace/precompute_embeddings.py once to build
        the embedding LMDB from all training conformers.
     2. Point this encoder at that LMDB via the ``lmdb_path`` constructor arg.
     3. Swap MACEEncoder -> CachedMACEEncoder in the experiment config.
@@ -653,7 +653,7 @@ class CachedMACEEncoder(MACEEncoder):
     ):
         """Args:
             lmdb_path: Path to the pre-computed embedding LMDB produced by
-                playground/tabasco/mace/precompute_embeddings.py.
+                encoder_profiling/tabasco/mace/precompute_embeddings.py.
             encoder_dim: Embedding dimensionality (must match the pre-compute
                 run; default 192 matches MACE-OFF small).
             fallback_model_name: MACE model size for cache misses.
